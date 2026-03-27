@@ -15,11 +15,8 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 
-from langchain.agents import create_react_agent, AgentExecutor
-from langchain.prompts import PromptTemplate
-from langchain.tools import Tool
-from langchain_groq import ChatGroq
-from langchain_community.tools import DuckDuckGoSearchRun
+from groq import Groq
+from duckduckgo_search import DDGS
 
 # ============================================
 # DATABASE INITIALIZATION (STEP 1.4)
@@ -1369,75 +1366,124 @@ def query_database(query):
         connection.close()
 
 
-db_tool = Tool(
-    name="Database_Query",
-    func=query_database,
-    description="""
-    Use this tool to query the Global Trends database.
-    Available tables:
-    - suppliers: supplier_ID, supplier_Name, Account, wechat_Contact, Website, products
-    - product: product_ID, product_Categories, products_ID, supplier_ID, supplier_Type, MOQ, lead_Times, unit_Cost, selling_Price
-    - retailers: retailer_ID, retailer_Name, status, order_Quantity, product, order_Status, management_Contacts, payment_Terms
-    - customers: customer_ID, customer_Name, contact_Number, email, total_orders, total_spent, outstanding_balance
-    - inventory: inventory_ID, product_ID, product_Name, stock_on_hand, reorder_level, reorder_quantity, location, last_updated
-    - chart_of_accounts: account_ID, account_Name, account_Type, balance
-    - accounts_receivable: receivable_ID, customer_ID, customer_Name, invoice_Date, due_Date, invoice_Amount, outstanding_Balance, status
-    - accounts_payable: payable_ID, supplier_ID, supplier_Name, invoice_Date, due_Date, invoice_Amount, outstanding_Balance, status
-    - drawings: drawing_ID, date, amount, description
-    - transactions: transaction_ID, date, description, account_Debit, account_Credit, amount, category
+# -----------------------
+# GROQ DIRECT CLIENT
+# -----------------------
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-    You can ask questions like:
-    - Show me all active suppliers
-    - Which products are low on stock?
-    - What are the top rated suppliers?
-    - Show me retailers with pending orders
-    - What is the total accounts receivable?
-    - Show me customers with outstanding balances
-    - What are the recent transactions?
+# -----------------------
+# TOOL: DATABASE QUERY
+# -----------------------
+def run_db_tool(query):
+    """Run a SELECT SQL query against the database."""
+    return query_database(query)
+
+# -----------------------
+# TOOL: DUCKDUCKGO SEARCH
+# -----------------------
+def run_web_search(query):
+    """Search the web using DuckDuckGo."""
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=5))
+            if not results:
+                return "No results found."
+            output = ""
+            for r in results:
+                output += f"Title: {r.get('title', '')}\nSnippet: {r.get('body', '')}\nURL: {r.get('href', '')}\n\n"
+            return output.strip()
+    except Exception as e:
+        return f"Search error: {str(e)}"
+
+# -----------------------
+# REACT AGENT LOOP (Groq Direct)
+# -----------------------
+def run_react_agent(user_question, max_iterations=6):
     """
-)
+    Manual ReAct (Reason + Act) agent loop using Groq directly.
+    The agent reasons step by step, chooses a tool, observes the result,
+    and repeats until it has a Final Answer.
+    """
+    system_prompt = """You are a helpful AI assistant for Global Trends, a trading company.
+You have access to two tools:
 
-search = DuckDuckGoSearchRun()
+1. Database_Query - Query the company's SQLite database. Input must be a valid SQL SELECT statement.
+   Tables available:
+   - suppliers: supplier_ID, supplier_Name, Account, wechat_Contact, Website, products
+   - product: product_ID, product_Categories, products_ID, supplier_ID, supplier_Type, MOQ, lead_Times, unit_Cost, selling_Price
+   - retailers: retailer_ID, retailer_Name, status, order_Quantity, product, order_Status, management_Contacts, payment_Terms
+   - customers: customer_ID, customer_Name, contact_Number, email, total_orders, total_spent, outstanding_balance
+   - inventory: inventory_ID, product_ID, product_Name, stock_on_hand, reorder_level, reorder_quantity, location, last_updated
+   - chart_of_accounts: account_ID, account_Name, account_Type, balance
+   - accounts_receivable: receivable_ID, customer_ID, customer_Name, invoice_Date, due_Date, invoice_Amount, outstanding_Balance, status
+   - accounts_payable: payable_ID, supplier_ID, supplier_Name, invoice_Date, due_Date, invoice_Amount, outstanding_Balance, status
+   - drawings: drawing_ID, date, amount, description
+   - transactions: transaction_ID, date, description, account_Debit, account_Credit, amount, category
 
-tools = [db_tool, search]
+2. Web_Search - Search the internet for current market trends, prices, or external information. Input is a plain search query string.
 
-# -----------------------
-# AI (GROQ)
-# -----------------------
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=os.getenv("GROQ_API_KEY"),
-    temperature=0.2
-)
+You must follow this EXACT format for every step:
 
-react_prompt = PromptTemplate.from_template(
-    """Answer the following questions as best you can. You have access to the following tools:
+Thought: <your reasoning about what to do next>
+Action: <either Database_Query or Web_Search>
+Action Input: <the SQL query or search string>
+Observation: <this will be filled in for you>
 
-{tools}
-
-Use the following format:
-
-Question: the input question you must answer
-Thought: you should always think about what to do
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
+When you have enough information to answer, respond with:
 Thought: I now know the final answer
-Final Answer: the final answer to the original input question
+Final Answer: <your complete answer to the user>
 
-Begin!
+Never skip the Thought step. Never make up observations — wait for them."""
 
-Question: {input}
-Thought:{agent_scratchpad}"""
-)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Question: {user_question}\nThought:"}
+    ]
 
-agent = AgentExecutor(
-    agent=create_react_agent(llm=llm, tools=tools, prompt=react_prompt),
-    tools=tools,
-    verbose=True,
-    handle_parsing_errors=True
-)
+    for i in range(max_iterations):
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            temperature=0.2,
+            max_tokens=1000,
+            stop=["Observation:"]  # Stop when agent expects a tool result
+        )
+
+        assistant_text = response.choices[0].message.content.strip()
+        messages.append({"role": "assistant", "content": assistant_text})
+
+        # Check if we have a Final Answer
+        if "Final Answer:" in assistant_text:
+            final = assistant_text.split("Final Answer:")[-1].strip()
+            return final
+
+        # Parse Action and Action Input
+        action = None
+        action_input = None
+
+        for line in assistant_text.split("\n"):
+            if line.startswith("Action:"):
+                action = line.replace("Action:", "").strip()
+            if line.startswith("Action Input:"):
+                action_input = line.replace("Action Input:", "").strip()
+
+        if not action or not action_input:
+            # Agent didn't follow format — ask it to continue
+            messages.append({"role": "user", "content": "Please continue with Action and Action Input."})
+            continue
+
+        # Run the chosen tool
+        if "Database" in action or "database" in action or "DB" in action:
+            observation = run_db_tool(action_input)
+        elif "Search" in action or "search" in action or "Web" in action:
+            observation = run_web_search(action_input)
+        else:
+            observation = f"Unknown tool '{action}'. Please use Database_Query or Web_Search."
+
+        # Feed the observation back to the agent
+        messages.append({"role": "user", "content": f"Observation: {observation}\nThought:"})
+
+    return "I was unable to find a complete answer after several reasoning steps. Please try rephrasing your question."
 
 # -----------------------
 # STREAMLIT UI
@@ -1691,7 +1737,7 @@ elif page == "💬 AI Chat Assistant":
 
         try:
             with st.spinner("Thinking..."):
-                response = agent.invoke({"input": user_input})["output"]
+                response = run_react_agent(user_input)
         except Exception as e:
             response = f"⚠️ Error: {str(e)}"
 

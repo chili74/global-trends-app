@@ -1,9 +1,7 @@
+s
 streamlit
 pandas
-langchain
-langchain-core
-langchain-community
-langchain-groq
+groq
 duckduckgo-search
 reportlab
 python-dotenv
