@@ -15,8 +15,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 
-from langchain.agents import create_react_agent
-from langchain.agents import AgentExecutor
+from langchain.agents import create_react_agent, AgentExecutor
 from langchain.prompts import PromptTemplate
 from langchain.tools import Tool
 from langchain_groq import ChatGroq
