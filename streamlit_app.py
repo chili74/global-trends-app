@@ -15,7 +15,8 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 
-from langchain.agents import initialize_agent, AgentType
+from langchain.agents import create_react_agent, AgentExecutor
+from langchain.prompts import PromptTemplate
 from langchain.tools import Tool
 from langchain_groq import ChatGroq
 from langchain_community.tools import DuckDuckGoSearchRun
@@ -1410,11 +1411,33 @@ llm = ChatGroq(
     temperature=0.2
 )
 
-agent = initialize_agent(
+react_prompt = PromptTemplate.from_template(
+    """Answer the following questions as best you can. You have access to the following tools:
+
+{tools}
+
+Use the following format:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question
+
+Begin!
+
+Question: {input}
+Thought:{agent_scratchpad}"""
+)
+
+agent = AgentExecutor(
+    agent=create_react_agent(llm=llm, tools=tools, prompt=react_prompt),
     tools=tools,
-    llm=llm,
-    agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-    verbose=True
+    verbose=True,
+    handle_parsing_errors=True
 )
 
 # -----------------------
@@ -1669,7 +1692,7 @@ elif page == "💬 AI Chat Assistant":
 
         try:
             with st.spinner("Thinking..."):
-                response = agent.run(user_input)
+                response = agent.invoke({"input": user_input})["output"]
         except Exception as e:
             response = f"⚠️ Error: {str(e)}"
 
