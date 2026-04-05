@@ -9,6 +9,9 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import io
+import json
+import threading
+import time
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
@@ -17,443 +20,446 @@ from reportlab.lib.units import inch
 
 from groq import Groq
 from duckduckgo_search import DDGS
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ============================================
-# DATABASE INITIALIZATION (STEP 1.4)
+# PAGE CONFIG
 # ============================================
+st.set_page_config(
+    page_title="Global Trends AI",
+    page_icon="🌍",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
+# ============================================
+# CUSTOM CSS
+# ============================================
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'DM Sans', sans-serif;
+    }
+    h1, h2, h3 {
+        font-family: 'Syne', sans-serif !important;
+        font-weight: 700;
+    }
+    .stMetric {
+        background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+        border: 1px solid #2d2d4e;
+        border-radius: 12px;
+        padding: 1rem;
+    }
+    .agent-card {
+        background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+        border: 1px solid #2d2d4e;
+        border-radius: 16px;
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        position: relative;
+        overflow: hidden;
+    }
+    .agent-card::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, #00d4ff, #7b2fff, #ff6b35);
+    }
+    .agent-active { border-color: #00d4ff; }
+    .agent-warning { border-color: #ffaa00; }
+    .agent-error { border-color: #ff4444; }
+    .status-dot {
+        display: inline-block;
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        margin-right: 6px;
+        animation: pulse 2s infinite;
+    }
+    .dot-green { background: #00ff88; }
+    .dot-yellow { background: #ffaa00; }
+    .dot-red { background: #ff4444; }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+    }
+    .alert-box {
+        background: rgba(255, 170, 0, 0.1);
+        border: 1px solid #ffaa00;
+        border-radius: 10px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+    }
+    .alert-box-red {
+        background: rgba(255, 68, 68, 0.1);
+        border: 1px solid #ff4444;
+        border-radius: 10px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+    }
+    .alert-box-green {
+        background: rgba(0, 255, 136, 0.1);
+        border: 1px solid #00ff88;
+        border-radius: 10px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+    }
+    div[data-testid="stSidebarNav"] { display: none; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ============================================
+# DATABASE INITIALIZATION
+# ============================================
 def init_database():
-    """Initialize the database with all tables and sample data if it doesn't exist"""
-
-    # Check if database already exists
     if os.path.exists('global.db'):
-        # Verify tables exist
         conn = sqlite3.connect('global.db')
         cursor = conn.cursor()
-
-        # Check if suppliers table exists
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='suppliers'")
         if cursor.fetchone():
             conn.close()
-            return  # Database exists and has tables
+            return
 
-    # Create new database
-    st.warning("Creating new database with sample data...")
     conn = sqlite3.connect('global.db')
     cursor = conn.cursor()
 
-    # ============================================
-    # TABLE 1: SUPPLIERS
-    # ============================================
-    cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS suppliers
-                   (
-                       supplier_ID
-                       VARCHAR
-                   (
-                       10
-                   ) PRIMARY KEY,
-                       supplier_Name VARCHAR
-                   (
-                       100
-                   ) NOT NULL,
-                       Account VARCHAR
-                   (
-                       100
-                   ),
-                       wechat_Contact VARCHAR
-                   (
-                       100
-                   ),
-                       Website VARCHAR
-                   (
-                       255
-                   ),
-                       products TEXT
-                       )
-                   ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS suppliers
+    (
+        supplier_ID
+        VARCHAR
+                      (
+        10
+                      ) PRIMARY KEY, supplier_Name VARCHAR
+                      (
+                          100
+                      ) NOT NULL,
+        Account VARCHAR
+                      (
+                          100
+                      ), wechat_Contact VARCHAR
+                      (
+                          100
+                      ), Website VARCHAR
+                      (
+                          255
+                      ), products TEXT)''')
 
-    # ============================================
-    # TABLE 2: PRODUCT
-    # ============================================
-    cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS product
-                   (
-                       product_ID
-                       VARCHAR
-                   (
-                       10
-                   ) PRIMARY KEY,
-                       product_Categories VARCHAR
-                   (
-                       100
-                   ),
-                       products_ID VARCHAR
-                   (
-                       100
-                   ),
-                       supplier_ID VARCHAR
-                   (
-                       10
-                   ),
-                       supplier_Type VARCHAR
-                   (
-                       50
-                   ),
-                       MOQ VARCHAR
-                   (
-                       50
-                   ),
-                       lead_Times VARCHAR
-                   (
-                       50
-                   ),
-                       unit_Cost DECIMAL
-                   (
-                       10,
-                       2
-                   ),
-                       selling_Price DECIMAL
-                   (
-                       10,
-                       2
-                   ),
-                       FOREIGN KEY
-                   (
-                       supplier_ID
-                   ) REFERENCES suppliers
-                   (
-                       supplier_ID
-                   )
-                       )
-                   ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS product
+    (
+        product_ID
+        VARCHAR
+                      (
+        10
+                      ) PRIMARY KEY, product_Categories VARCHAR
+                      (
+                          100
+                      ),
+        products_ID VARCHAR
+                      (
+                          100
+                      ), supplier_ID VARCHAR
+                      (
+                          10
+                      ), supplier_Type VARCHAR
+                      (
+                          50
+                      ),
+        MOQ VARCHAR
+                      (
+                          50
+                      ), lead_Times VARCHAR
+                      (
+                          50
+                      ), unit_Cost DECIMAL
+                      (
+                          10,
+                          2
+                      ), selling_Price DECIMAL
+                      (
+                          10,
+                          2
+                      ),
+        FOREIGN KEY
+                      (
+                          supplier_ID
+                      ) REFERENCES suppliers
+                      (
+                          supplier_ID
+                      ))''')
 
-    # ============================================
-    # TABLE 3: RETAILERS
-    # ============================================
-    cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS retailers
-                   (
-                       retailer_ID
-                       VARCHAR
-                   (
-                       10
-                   ) PRIMARY KEY,
-                       retailer_Name VARCHAR
-                   (
-                       100
-                   ) NOT NULL,
-                       status VARCHAR
-                   (
-                       20
-                   ),
-                       order_Quantity VARCHAR
-                   (
-                       50
-                   ),
-                       product TEXT,
-                       order_Status VARCHAR
-                   (
-                       50
-                   ),
-                       management_Contacts VARCHAR
-                   (
-                       100
-                   ),
-                       payment_Terms VARCHAR
-                   (
-                       50
-                   )
-                       )
-                   ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS retailers
+    (
+        retailer_ID
+        VARCHAR
+                      (
+        10
+                      ) PRIMARY KEY, retailer_Name VARCHAR
+                      (
+                          100
+                      ) NOT NULL,
+        status VARCHAR
+                      (
+                          20
+                      ), order_Quantity VARCHAR
+                      (
+                          50
+                      ), product TEXT,
+        order_Status VARCHAR
+                      (
+                          50
+                      ), management_Contacts VARCHAR
+                      (
+                          100
+                      ), payment_Terms VARCHAR
+                      (
+                          50
+                      ))''')
 
-    # ============================================
-    # TABLE 4: INDEPENDENT CUSTOMERS
-    # ============================================
-    cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS customers
-                   (
-                       customer_ID
-                       VARCHAR
-                   (
-                       10
-                   ) PRIMARY KEY,
-                       customer_Name VARCHAR
-                   (
-                       100
-                   ) NOT NULL,
-                       contact_Number VARCHAR
-                   (
-                       20
-                   ),
-                       email VARCHAR
-                   (
-                       100
-                   ),
-                       total_orders INT DEFAULT 0,
-                       total_spent DECIMAL
-                   (
-                       10,
-                       2
-                   ) DEFAULT 0.00,
-                       outstanding_balance DECIMAL
-                   (
-                       10,
-                       2
-                   ) DEFAULT 0.00
-                       )
-                   ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS customers
+    (
+        customer_ID
+        VARCHAR
+                      (
+        10
+                      ) PRIMARY KEY, customer_Name VARCHAR
+                      (
+                          100
+                      ) NOT NULL,
+        contact_Number VARCHAR
+                      (
+                          20
+                      ), email VARCHAR
+                      (
+                          100
+                      ), total_orders INT DEFAULT 0,
+        total_spent DECIMAL
+                      (
+                          10,
+                          2
+                      ) DEFAULT 0.00, outstanding_balance DECIMAL
+                      (
+                          10,
+                          2
+                      ) DEFAULT 0.00,
+        last_order_date DATE)''')
 
-    # ============================================
-    # TABLE 5: INVENTORY
-    # ============================================
-    cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS inventory
-                   (
-                       inventory_ID
-                       VARCHAR
-                   (
-                       10
-                   ) PRIMARY KEY,
-                       product_ID VARCHAR
-                   (
-                       10
-                   ),
-                       product_Name VARCHAR
-                   (
-                       100
-                   ),
-                       stock_on_hand INT,
-                       reorder_level INT,
-                       reorder_quantity INT,
-                       location VARCHAR
-                   (
-                       50
-                   ),
-                       last_updated DATE,
-                       FOREIGN KEY
-                   (
-                       product_ID
-                   ) REFERENCES product
-                   (
-                       product_ID
-                   )
-                       )
-                   ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS inventory
+    (
+        inventory_ID
+        VARCHAR
+                      (
+        10
+                      ) PRIMARY KEY, product_ID VARCHAR
+                      (
+                          10
+                      ), product_Name VARCHAR
+                      (
+                          100
+                      ),
+        stock_on_hand INT, reorder_level INT, reorder_quantity INT, location VARCHAR
+                      (
+                          50
+                      ),
+        last_updated DATE, FOREIGN KEY
+                      (
+                          product_ID
+                      ) REFERENCES product
+                      (
+                          product_ID
+                      ))''')
 
-    # ============================================
-    # TABLE 6a: CHART OF ACCOUNTS
-    # ============================================
-    cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS chart_of_accounts
-                   (
-                       account_ID
-                       VARCHAR
-                   (
-                       10
-                   ) PRIMARY KEY,
-                       account_Name VARCHAR
-                   (
-                       100
-                   ),
-                       account_Type VARCHAR
-                   (
-                       50
-                   ),
-                       balance DECIMAL
-                   (
-                       12,
-                       2
-                   )
-                       )
-                   ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS chart_of_accounts
+    (
+        account_ID
+        VARCHAR
+                      (
+        10
+                      ) PRIMARY KEY, account_Name VARCHAR
+                      (
+                          100
+                      ),
+        account_Type VARCHAR
+                      (
+                          50
+                      ), balance DECIMAL
+                      (
+                          12,
+                          2
+                      ))''')
 
-    # ============================================
-    # TABLE 6b: ACCOUNTS RECEIVABLE
-    # ============================================
-    cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS accounts_receivable
-                   (
-                       receivable_ID
-                       VARCHAR
-                   (
-                       10
-                   ) PRIMARY KEY,
-                       customer_ID VARCHAR
-                   (
-                       10
-                   ),
-                       customer_Name VARCHAR
-                   (
-                       100
-                   ),
-                       invoice_Date DATE,
-                       due_Date DATE,
-                       invoice_Amount DECIMAL
-                   (
-                       10,
-                       2
-                   ),
-                       amount_Paid DECIMAL
-                   (
-                       10,
-                       2
-                   ) DEFAULT 0.00,
-                       outstanding_Balance DECIMAL
-                   (
-                       10,
-                       2
-                   ),
-                       status VARCHAR
-                   (
-                       20
-                   )
-                       )
-                   ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS accounts_receivable
+    (
+        receivable_ID
+        VARCHAR
+                      (
+        10
+                      ) PRIMARY KEY, customer_ID VARCHAR
+                      (
+                          10
+                      ),
+        customer_Name VARCHAR
+                      (
+                          100
+                      ), invoice_Date DATE, due_Date DATE,
+        invoice_Amount DECIMAL
+                      (
+                          10,
+                          2
+                      ), amount_Paid DECIMAL
+                      (
+                          10,
+                          2
+                      ) DEFAULT 0.00,
+        outstanding_Balance DECIMAL
+                      (
+                          10,
+                          2
+                      ), status VARCHAR
+                      (
+                          20
+                      ))''')
 
-    # ============================================
-    # TABLE 6c: ACCOUNTS PAYABLE
-    # ============================================
-    cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS accounts_payable
-                   (
-                       payable_ID
-                       VARCHAR
-                   (
-                       10
-                   ) PRIMARY KEY,
-                       supplier_ID VARCHAR
-                   (
-                       10
-                   ),
-                       supplier_Name VARCHAR
-                   (
-                       100
-                   ),
-                       invoice_Date DATE,
-                       due_Date DATE,
-                       invoice_Amount DECIMAL
-                   (
-                       10,
-                       2
-                   ),
-                       amount_Paid DECIMAL
-                   (
-                       10,
-                       2
-                   ) DEFAULT 0.00,
-                       outstanding_Balance DECIMAL
-                   (
-                       10,
-                       2
-                   ),
-                       status VARCHAR
-                   (
-                       20
-                   ),
-                       FOREIGN KEY
-                   (
-                       supplier_ID
-                   ) REFERENCES suppliers
-                   (
-                       supplier_ID
-                   )
-                       )
-                   ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS accounts_payable
+    (
+        payable_ID
+        VARCHAR
+                      (
+        10
+                      ) PRIMARY KEY, supplier_ID VARCHAR
+                      (
+                          10
+                      ),
+        supplier_Name VARCHAR
+                      (
+                          100
+                      ), invoice_Date DATE, due_Date DATE,
+        invoice_Amount DECIMAL
+                      (
+                          10,
+                          2
+                      ), amount_Paid DECIMAL
+                      (
+                          10,
+                          2
+                      ) DEFAULT 0.00,
+        outstanding_Balance DECIMAL
+                      (
+                          10,
+                          2
+                      ), status VARCHAR
+                      (
+                          20
+                      ),
+        FOREIGN KEY
+                      (
+                          supplier_ID
+                      ) REFERENCES suppliers
+                      (
+                          supplier_ID
+                      ))''')
 
-    # ============================================
-    # TABLE 6d: DRAWINGS
-    # ============================================
-    cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS drawings
-                   (
-                       drawing_ID
-                       VARCHAR
-                   (
-                       10
-                   ) PRIMARY KEY,
-                       date DATE,
-                       amount DECIMAL
-                   (
-                       10,
-                       2
-                   ),
-                       description VARCHAR
-                   (
-                       200
-                   ),
-                       notes TEXT
-                       )
-                   ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS drawings
+    (
+        drawing_ID
+        VARCHAR
+                      (
+        10
+                      ) PRIMARY KEY, date DATE, amount DECIMAL
+                      (
+                          10,
+                          2
+                      ),
+        description VARCHAR
+                      (
+                          200
+                      ), notes TEXT)''')
 
-    # ============================================
-    # TABLE 6e: TRANSACTIONS
-    # ============================================
-    cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS transactions
-                   (
-                       transaction_ID
-                       VARCHAR
-                   (
-                       10
-                   ) PRIMARY KEY,
-                       date DATE,
-                       description VARCHAR
-                   (
-                       200
-                   ),
-                       account_Debit VARCHAR
-                   (
-                       10
-                   ),
-                       account_Credit VARCHAR
-                   (
-                       10
-                   ),
-                       amount DECIMAL
-                   (
-                       10,
-                       2
-                   ),
-                       category VARCHAR
-                   (
-                       50
-                   )
-                       )
-                   ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS transactions
+    (
+        transaction_ID
+        VARCHAR
+                      (
+        10
+                      ) PRIMARY KEY, date DATE, description VARCHAR
+                      (
+                          200
+                      ),
+        account_Debit VARCHAR
+                      (
+                          10
+                      ), account_Credit VARCHAR
+                      (
+                          10
+                      ), amount DECIMAL
+                      (
+                          10,
+                          2
+                      ), category VARCHAR
+                      (
+                          50
+                      ))''')
 
-    # ============================================
-    # TABLE: PERFORMANCE NOTES
-    # ============================================
-    cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS performance_notes
-                   (
-                       supplier_ID
-                       VARCHAR
-                   (
-                       10
-                   ) PRIMARY KEY,
-                       supplier_Rating INT,
-                       Priority VARCHAR
-                   (
-                       20
-                   ),
-                       Notes TEXT,
-                       FOREIGN KEY
-                   (
-                       supplier_ID
-                   ) REFERENCES suppliers
-                   (
-                       supplier_ID
-                   )
-                       )
-                   ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS performance_notes
+    (
+        supplier_ID
+        VARCHAR
+                      (
+        10
+                      ) PRIMARY KEY, supplier_Rating INT, Priority VARCHAR
+                      (
+                          20
+                      ), Notes TEXT,
+        FOREIGN KEY
+                      (
+                          supplier_ID
+                      ) REFERENCES suppliers
+                      (
+                          supplier_ID
+                      ))''')
 
-    # ============================================
-    # INSERT SAMPLE DATA
-    # ============================================
+    # Agent logs table
+    cursor.execute('''CREATE TABLE IF NOT EXISTS agent_logs
+    (
+        log_ID
+        INTEGER
+        PRIMARY
+        KEY
+        AUTOINCREMENT,
+        agent_name
+        VARCHAR
+                      (
+        50
+                      ),
+        action_taken TEXT, result TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        severity VARCHAR
+                      (
+                          20
+                      ))''')
 
-    # Insert Suppliers
+    # Agent alerts table
+    cursor.execute('''CREATE TABLE IF NOT EXISTS agent_alerts
+    (
+        alert_ID
+        INTEGER
+        PRIMARY
+        KEY
+        AUTOINCREMENT,
+        agent_name
+        VARCHAR
+                      (
+        50
+                      ),
+        alert_type VARCHAR
+                      (
+                          50
+                      ), message TEXT, is_read INTEGER DEFAULT 0,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+
     suppliers_data = [
         ('s001', 'Huasheng Textiles Co., Ltd.', 'Wang Wei', 'wangwei_huasheng', 'www.huashengtextiles.cn',
          'Blankets, Bedding, Curtains'),
@@ -466,13 +472,8 @@ def init_database():
         ('s005', 'Ruixiang Textiles Import', 'Liu Na', 'liuna_ruixiang', 'www.ruixiangtextile.cn',
          'Bed Sheets, Pillowcases')
     ]
+    cursor.executemany('INSERT INTO suppliers VALUES (?,?,?,?,?,?)', suppliers_data)
 
-    cursor.executemany('''
-                       INSERT INTO suppliers (supplier_ID, supplier_Name, Account, wechat_Contact, Website, products)
-                       VALUES (?, ?, ?, ?, ?, ?)
-                       ''', suppliers_data)
-
-    # Insert Product
     product_data = [
         ('p001', 'Bedding', 'Egyptian Cotton Bed Sheet Set', 's001', 'Manufacturer', '20 units', '15 days', 187.50,
          399.00),
@@ -490,14 +491,8 @@ def init_database():
         ('p009', 'Bedding', 'Weighted Blanket - 6.8kg', 's005', 'Manufacturer', '15 units', '21 days', 291.50, 599.00),
         ('p010', 'Storage', 'Woven Bamboo Storage Baskets', 's004', 'Distributor', '25 units', '10 days', 67.80, 159.00)
     ]
+    cursor.executemany('INSERT INTO product VALUES (?,?,?,?,?,?,?,?,?)', product_data)
 
-    cursor.executemany('''
-                       INSERT INTO product (product_ID, product_Categories, products_ID, supplier_ID, supplier_Type,
-                                            MOQ, lead_Times, unit_Cost, selling_Price)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                       ''', product_data)
-
-    # Insert Retailers
     retailers_data = [
         ('r001', 'Takealot', 'Active', '48 units', 'Egyptian Cotton Bed Sheet Set, Microfleece Blanket', 'Shipped',
          'Sarah van der Merwe', 'Net 30'),
@@ -510,34 +505,22 @@ def init_database():
         ('r005', 'Checkers', 'Potential', '0 units', 'Sheer Voile Curtains', 'Quotation Sent', 'Linda Petersen',
          'To be confirmed')
     ]
+    cursor.executemany('INSERT INTO retailers VALUES (?,?,?,?,?,?,?,?)', retailers_data)
 
-    cursor.executemany('''
-                       INSERT INTO retailers (retailer_ID, retailer_Name, status, order_Quantity, product, order_Status,
-                                              management_Contacts, payment_Terms)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                       ''', retailers_data)
-
-    # Insert Customers
     customers_data = [
-        ('c001', 'Nomusa Dlamini', '082 123 4567', 'nomusa.dlamini@email.com', 2, 897.00, 0.00),
-        ('c002', 'Thabo Nkosi', '083 234 5678', 'thabo.nkosi@email.com', 1, 399.00, 0.00),
-        ('c003', 'Lerato Molefe', '084 345 6789', 'lerato.molefe@email.com', 3, 1187.00, 0.00),
-        ('c004', 'Sipho Mbele', '081 456 7890', 'sipho.mbele@email.com', 1, 279.00, 279.00),
-        ('c005', 'Priya Naidoo', '082 567 8901', 'priya.naidoo@email.com', 2, 798.00, 0.00),
-        ('c006', 'Johan Pretorius', '083 678 9012', 'johan.pretorius@email.com', 1, 449.00, 449.00),
-        ('c007', 'Zanele Khumalo', '084 789 0123', 'zanele.khumalo@email.com', 2, 618.00, 0.00),
-        ('c008', 'Michael Chen', '081 890 1234', 'michael.chen@email.com', 1, 199.00, 199.00),
-        ('c009', 'Fatima Patel', '082 901 2345', 'fatima.patel@email.com', 1, 349.00, 0.00),
-        ('c010', 'David Mokoena', '083 012 3456', 'david.mokoena@email.com', 1, 189.00, 0.00)
+        ('c001', 'Nomusa Dlamini', '082 123 4567', 'nomusa.dlamini@email.com', 2, 897.00, 0.00, '2025-03-20'),
+        ('c002', 'Thabo Nkosi', '083 234 5678', 'thabo.nkosi@email.com', 1, 399.00, 0.00, '2025-03-12'),
+        ('c003', 'Lerato Molefe', '084 345 6789', 'lerato.molefe@email.com', 3, 1187.00, 0.00, '2025-03-25'),
+        ('c004', 'Sipho Mbele', '081 456 7890', 'sipho.mbele@email.com', 1, 279.00, 279.00, '2025-03-10'),
+        ('c005', 'Priya Naidoo', '082 567 8901', 'priya.naidoo@email.com', 2, 798.00, 0.00, '2025-03-22'),
+        ('c006', 'Johan Pretorius', '083 678 9012', 'johan.pretorius@email.com', 1, 449.00, 449.00, '2025-03-05'),
+        ('c007', 'Zanele Khumalo', '084 789 0123', 'zanele.khumalo@email.com', 2, 618.00, 0.00, '2025-02-15'),
+        ('c008', 'Michael Chen', '081 890 1234', 'michael.chen@email.com', 1, 199.00, 199.00, '2025-03-10'),
+        ('c009', 'Fatima Patel', '082 901 2345', 'fatima.patel@email.com', 1, 349.00, 0.00, '2025-03-23'),
+        ('c010', 'David Mokoena', '083 012 3456', 'david.mokoena@email.com', 1, 189.00, 0.00, '2025-02-10')
     ]
+    cursor.executemany('INSERT INTO customers VALUES (?,?,?,?,?,?,?,?)', customers_data)
 
-    cursor.executemany('''
-                       INSERT INTO customers (customer_ID, customer_Name, contact_Number, email, total_orders,
-                                              total_spent, outstanding_balance)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)
-                       ''', customers_data)
-
-    # Insert Inventory
     inventory_data = [
         ('inv001', 'p001', 'Egyptian Cotton Bed Sheet Set', 12, 10, 20, 'Warehouse A', '2025-03-20'),
         ('inv002', 'p002', 'Microfleece Blanket - Queen', 8, 10, 30, 'Warehouse A', '2025-03-20'),
@@ -550,14 +533,8 @@ def init_database():
         ('inv009', 'p009', 'Weighted Blanket - 6.8kg', 2, 3, 15, 'Warehouse A', '2025-03-20'),
         ('inv010', 'p010', 'Woven Bamboo Storage Baskets', 8, 10, 25, 'Warehouse B', '2025-03-20')
     ]
+    cursor.executemany('INSERT INTO inventory VALUES (?,?,?,?,?,?,?,?)', inventory_data)
 
-    cursor.executemany('''
-                       INSERT INTO inventory (inventory_ID, product_ID, product_Name, stock_on_hand, reorder_level,
-                                              reorder_quantity, location, last_updated)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                       ''', inventory_data)
-
-    # Insert Performance Notes
     performance_notes_data = [
         ('s001', 5, 'Main', 'Reliable manufacturer, excellent quality bedding. Communication with Wang Wei is prompt.'),
         ('s002', 4, 'Main',
@@ -566,34 +543,20 @@ def init_database():
         ('s004', 3, 'Reserve', 'Zhang Yong is professional but MOQ is high. Testing smaller orders first.'),
         ('s005', 5, 'Main', 'Liu Na provides excellent customer service. Premium bedding products. Highly recommended.')
     ]
+    cursor.executemany('INSERT INTO performance_notes VALUES (?,?,?,?)', performance_notes_data)
 
-    cursor.executemany('''
-                       INSERT INTO performance_notes (supplier_ID, supplier_Rating, Priority, Notes)
-                       VALUES (?, ?, ?, ?)
-                       ''', performance_notes_data)
-
-    # Insert Chart of Accounts
     chart_of_accounts_data = [
-        ('a001', 'Cash on Hand', 'Asset', 81025.00),
-        ('a002', 'Bank Account', 'Asset', 44275.00),
-        ('a003', 'Inventory', 'Asset', 84750.00),
-        ('a004', 'Accounts Receivable', 'Asset', 32935.00),
+        ('a001', 'Cash on Hand', 'Asset', 81025.00), ('a002', 'Bank Account', 'Asset', 44275.00),
+        ('a003', 'Inventory', 'Asset', 84750.00), ('a004', 'Accounts Receivable', 'Asset', 32935.00),
         ('a005', 'Equipment & Furniture', 'Asset', 14850.00),
         ('a006', 'Loan Payable - First National Bank', 'Liability', 50000.00),
         ('a007', 'Accounts Payable', 'Liability', 20375.00),
-        ('a008', 'Owner\'s Equity - Capital', 'Equity', 150000.00),
-        ('a009', 'Retained Earnings', 'Equity', 0.00),
-        ('a010', 'Sales Revenue', 'Income', 0.00),
-        ('a011', 'Cost of Goods Sold', 'Expense', 0.00),
-        ('a012', 'Operating Expenses', 'Expense', 0.00)
+        ('a008', "Owner's Equity - Capital", 'Equity', 150000.00),
+        ('a009', 'Retained Earnings', 'Equity', 0.00), ('a010', 'Sales Revenue', 'Income', 0.00),
+        ('a011', 'Cost of Goods Sold', 'Expense', 0.00), ('a012', 'Operating Expenses', 'Expense', 0.00)
     ]
+    cursor.executemany('INSERT INTO chart_of_accounts VALUES (?,?,?,?)', chart_of_accounts_data)
 
-    cursor.executemany('''
-                       INSERT INTO chart_of_accounts (account_ID, account_Name, account_Type, balance)
-                       VALUES (?, ?, ?, ?)
-                       ''', chart_of_accounts_data)
-
-    # Insert Accounts Receivable
     accounts_receivable_data = [
         ('ar001', 'c004', 'Sipho Mbele', '2025-03-01', '2025-03-31', 279.00, 0.00, 279.00, 'Overdue'),
         ('ar002', 'c006', 'Johan Pretorius', '2025-03-05', '2025-04-04', 449.00, 0.00, 449.00, 'Current'),
@@ -606,15 +569,8 @@ def init_database():
         ('ar009', 'c010', 'David Mokoena', '2025-03-24', '2025-04-23', 189.00, 189.00, 0.00, 'Paid'),
         ('ar010', 'c003', 'Lerato Molefe', '2025-03-25', '2025-04-24', 1187.00, 1187.00, 0.00, 'Paid')
     ]
+    cursor.executemany('INSERT INTO accounts_receivable VALUES (?,?,?,?,?,?,?,?,?)', accounts_receivable_data)
 
-    cursor.executemany('''
-                       INSERT INTO accounts_receivable (receivable_ID, customer_ID, customer_Name, invoice_Date,
-                                                        due_Date, invoice_Amount, amount_Paid, outstanding_Balance,
-                                                        status)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                       ''', accounts_receivable_data)
-
-    # Insert Accounts Payable
     accounts_payable_data = [
         ('ap001', 's001', 'Huasheng Textiles', '2025-03-01', '2025-03-31', 24875.00, 24875.00, 0.00, 'Paid'),
         ('ap002', 's002', 'Jiangnan Ceramics', '2025-03-05', '2025-04-04', 8475.00, 0.00, 8475.00, 'Current'),
@@ -622,26 +578,15 @@ def init_database():
         ('ap004', 's004', 'Xinguang Plastic Products', '2025-03-12', '2025-04-11', 5925.00, 5925.00, 0.00, 'Paid'),
         ('ap005', 's005', 'Ruixiang Textiles Import', '2025-03-15', '2025-04-14', 12750.00, 12750.00, 0.00, 'Paid')
     ]
+    cursor.executemany('INSERT INTO accounts_payable VALUES (?,?,?,?,?,?,?,?,?)', accounts_payable_data)
 
-    cursor.executemany('''
-                       INSERT INTO accounts_payable (payable_ID, supplier_ID, supplier_Name, invoice_Date, due_Date,
-                                                     invoice_Amount, amount_Paid, outstanding_Balance, status)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                       ''', accounts_payable_data)
-
-    # Insert Drawings
     drawings_data = [
         ('d001', '2025-03-05', 5250.00, 'Owner salary - March', 'Monthly salary'),
         ('d002', '2025-03-20', 2375.00, 'Personal expenses', 'Business expenses'),
         ('d003', '2025-03-28', 1200.00, 'Family emergency withdrawal', 'Temporary draw')
     ]
+    cursor.executemany('INSERT INTO drawings VALUES (?,?,?,?,?)', drawings_data)
 
-    cursor.executemany('''
-                       INSERT INTO drawings (drawing_ID, date, amount, description, notes)
-                       VALUES (?, ?, ?, ?, ?)
-                       ''', drawings_data)
-
-    # Insert Transactions
     transactions_data = [
         ('t001', '2025-03-01', 'Initial capital deposit', 'a002', 'a008', 150000.00, 'Capital'),
         ('t002', '2025-03-01', 'Bank loan received - FNB', 'a002', 'a006', 50000.00, 'Financing'),
@@ -674,825 +619,1018 @@ def init_database():
         ('t029', '2025-03-28', 'Marketing expense - Flyers & signage', 'a012', 'a002', 2000.00, 'Expense'),
         ('t030', '2025-03-30', 'Operating expense - Utilities', 'a012', 'a002', 1875.00, 'Expense')
     ]
-
-    cursor.executemany('''
-                       INSERT INTO transactions (transaction_ID, date, description, account_Debit, account_Credit,
-                                                 amount, category)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)
-                       ''', transactions_data)
+    cursor.executemany('INSERT INTO transactions VALUES (?,?,?,?,?,?,?)', transactions_data)
 
     conn.commit()
     conn.close()
 
-    st.success("✅ Database created successfully with sample data!")
-    return True
 
-
-# ============================================
-# CHECK AND INITIALIZE DATABASE ON STARTUP
-# ============================================
-
-# Call this function at the beginning of your app
 if not os.path.exists('global.db'):
     init_database()
 else:
-    # Verify tables exist
     try:
         conn = sqlite3.connect('global.db')
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='suppliers'")
         if not cursor.fetchone():
-            st.warning("Database found but tables missing. Recreating database...")
             conn.close()
             os.remove('global.db')
             init_database()
         else:
+            # Ensure agent tables exist
+            cursor.execute('''CREATE TABLE IF NOT EXISTS agent_logs
+            (
+                log_ID
+                INTEGER
+                PRIMARY
+                KEY
+                AUTOINCREMENT,
+                agent_name
+                VARCHAR
+                              (
+                50
+                              ),
+                action_taken TEXT, result TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, severity VARCHAR
+                              (
+                                  20
+                              ))''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS agent_alerts
+            (
+                alert_ID
+                INTEGER
+                PRIMARY
+                KEY
+                AUTOINCREMENT,
+                agent_name
+                VARCHAR
+                              (
+                50
+                              ),
+                alert_type VARCHAR
+                              (
+                                  50
+                              ), message TEXT, is_read INTEGER DEFAULT 0,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+            conn.commit()
             conn.close()
     except Exception as e:
         st.error(f"Database error: {e}")
-        st.info("Attempting to recreate database...")
-        if os.path.exists('global.db'):
-            os.remove('global.db')
-        init_database()
 
 # ============================================
-# END OF DATABASE INITIALIZATION
+# API KEY CHECK
 # ============================================
-
-# -----------------------
-# CHECK GROQ API KEY
-# -----------------------
 if not os.getenv("GROQ_API_KEY"):
-    st.error("🚨 GROQ_API_KEY is not set. Please set it in your environment variables.")
+    st.error("🚨 GROQ_API_KEY is not set.")
     st.stop()
 
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# -----------------------
-# EMAIL CONFIGURATION
-# -----------------------
+
+# ============================================
+# NOTIFICATION HELPERS
+# ============================================
 def get_email_config():
-    """Securely get email configuration"""
     config = {}
-
-    # Try Streamlit Secrets first
     try:
         config['smtp_server'] = st.secrets.get("SMTP_SERVER", "")
         config['smtp_port'] = int(st.secrets.get("SMTP_PORT", 587))
         config['sender_email'] = st.secrets.get("SENDER_EMAIL", "")
         config['sender_password'] = st.secrets.get("SENDER_PASSWORD", "")
-
         if config['sender_email'] and config['sender_password']:
             return config
     except Exception:
         pass
-
-    # Fall back to environment variables
     config['smtp_server'] = os.getenv("SMTP_SERVER", "smtp.gmail.com")
     config['smtp_port'] = int(os.getenv("SMTP_PORT", 587))
     config['sender_email'] = os.getenv("SENDER_EMAIL", "")
     config['sender_password'] = os.getenv("SENDER_PASSWORD", "")
-
     return config
 
 
 EMAIL_CONFIG = get_email_config()
 
 
-# -----------------------
-# DATABASE FUNCTIONS WITH CACHING (STEP 1.5)
-# -----------------------
-
-@st.cache_data(ttl=60, show_spinner=False)
-def get_suppliers():
-    """Get all suppliers with caching"""
-    connection = sqlite3.connect("global.db")
-    try:
-        df = pd.read_sql_query("SELECT * FROM suppliers", connection)
-        if df.empty:
-            return pd.DataFrame()  # Return empty DataFrame instead of None
-        return df
-    except Exception as e:
-        st.error(f"Error loading suppliers: {str(e)}")
-        return pd.DataFrame()
-    finally:
-        connection.close()
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def get_products():
-    """Get all products with caching"""
-    connection = sqlite3.connect("global.db")
-    try:
-        df = pd.read_sql_query("""
-                               SELECT p.*, s.supplier_Name
-                               FROM product p
-                                        LEFT JOIN suppliers s ON p.supplier_ID = s.supplier_ID
-                               """, connection)
-        if df.empty:
-            return pd.DataFrame()
-        return df
-    except Exception as e:
-        st.error(f"Error loading products: {str(e)}")
-        return pd.DataFrame()
-    finally:
-        connection.close()
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def get_retailers():
-    """Get all retailers with caching"""
-    connection = sqlite3.connect("global.db")
-    try:
-        df = pd.read_sql_query("SELECT * FROM retailers", connection)
-        if df.empty:
-            return pd.DataFrame()
-        return df
-    except Exception as e:
-        st.error(f"Error loading retailers: {str(e)}")
-        return pd.DataFrame()
-    finally:
-        connection.close()
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def get_customers():
-    """Get all independent customers with caching"""
-    connection = sqlite3.connect("global.db")
-    try:
-        df = pd.read_sql_query("SELECT * FROM customers", connection)
-        if df.empty:
-            return pd.DataFrame()
-        return df
-    except Exception as e:
-        st.error(f"Error loading customers: {str(e)}")
-        return pd.DataFrame()
-    finally:
-        connection.close()
-
-
-@st.cache_data(ttl=30, show_spinner=False)  # Shorter TTL for inventory
-def get_inventory():
-    """Get inventory levels with caching"""
-    connection = sqlite3.connect("global.db")
-    try:
-        # Check if supplier_ID exists in inventory table
-        cursor = connection.cursor()
-        cursor.execute("PRAGMA table_info(inventory)")
-        columns = [col[1] for col in cursor.fetchall()]
-
-        if 'supplier_ID' in columns:
-            query = """
-                    SELECT i.*, p.selling_Price, p.unit_Cost, p.supplier_ID
-                    FROM inventory i
-                             LEFT JOIN product p ON i.product_ID = p.product_ID
-                    ORDER BY i.stock_on_hand ASC \
-                    """
-        else:
-            query = """
-                    SELECT i.*, p.selling_Price, p.unit_Cost
-                    FROM inventory i
-                             LEFT JOIN product p ON i.product_ID = p.product_ID
-                    ORDER BY i.stock_on_hand ASC \
-                    """
-        df = pd.read_sql_query(query, connection)
-        if df.empty:
-            return pd.DataFrame()
-        return df
-    except Exception as e:
-        st.error(f"Error loading inventory: {str(e)}")
-        return pd.DataFrame()
-    finally:
-        connection.close()
-
-
-@st.cache_data(ttl=300, show_spinner=False)  # Longer TTL for financial data
-def get_financial_summary():
-    """Get financial summary with caching"""
-    connection = sqlite3.connect("global.db")
-    try:
-        sales = pd.read_sql_query("SELECT SUM(invoice_Amount) as total_sales FROM accounts_receivable", connection)
-        ar = pd.read_sql_query(
-            "SELECT SUM(outstanding_Balance) as total_ar FROM accounts_receivable WHERE status != 'Paid'", connection)
-        ap = pd.read_sql_query(
-            "SELECT SUM(outstanding_Balance) as total_ap FROM accounts_payable WHERE status != 'Paid'", connection)
-        drawings = pd.read_sql_query("SELECT SUM(amount) as total_drawings FROM drawings", connection)
-
-        return {
-            'total_sales': sales['total_sales'].iloc[0] if sales['total_sales'].iloc[0] else 0,
-            'total_ar': ar['total_ar'].iloc[0] if ar['total_ar'].iloc[0] else 0,
-            'total_ap': ap['total_ap'].iloc[0] if ap['total_ap'].iloc[0] else 0,
-            'total_drawings': drawings['total_drawings'].iloc[0] if drawings['total_drawings'].iloc[0] else 0
-        }
-    except Exception as e:
-        st.error(f"Error loading financial summary: {str(e)}")
-        return {
-            'total_sales': 0,
-            'total_ar': 0,
-            'total_ap': 0,
-            'total_drawings': 0
-        }
-    finally:
-        connection.close()
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def get_performance():
-    """Get supplier performance with caching"""
-    connection = sqlite3.connect("global.db")
-    try:
-        # Check if performance_notes table exists
-        cursor = connection.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='performance_notes'")
-        table_exists = cursor.fetchone()
-
-        if table_exists:
-            df = pd.read_sql_query("""
-                                   SELECT s.supplier_Name, p.supplier_Rating, p.Priority, p.Notes
-                                   FROM performance_notes p
-                                            JOIN suppliers s ON p.supplier_ID = s.supplier_ID
-                                   ORDER BY p.supplier_Rating DESC
-                                   """, connection)
-            if df.empty:
-                return pd.DataFrame()
-            return df
-        else:
-            # Create a default performance dataframe if table doesn't exist
-            suppliers_df = pd.read_sql_query("SELECT supplier_ID, supplier_Name FROM suppliers", connection)
-            if suppliers_df.empty:
-                return pd.DataFrame()
-
-            default_data = []
-            for _, row in suppliers_df.iterrows():
-                default_data.append({
-                    'supplier_Name': row['supplier_Name'],
-                    'supplier_Rating': 3,
-                    'Priority': 'Alternative',
-                    'Notes': 'No performance data available yet'
-                })
-            return pd.DataFrame(default_data)
-    except Exception as e:
-        st.error(f"Error loading performance data: {str(e)}")
-        return pd.DataFrame()
-    finally:
-        connection.close()
-
-
-def check_low_stock():
-    """Check all products for low stock levels"""
-    connection = sqlite3.connect("global.db")
-    try:
-        # First check if supplier_ID exists in inventory
-        cursor = connection.cursor()
-        cursor.execute("PRAGMA table_info(inventory)")
-        columns = [col[1] for col in cursor.fetchall()]
-
-        if 'supplier_ID' in columns:
-            df = pd.read_sql_query("""
-                                   SELECT product_Name, stock_on_hand, reorder_level, reorder_quantity, supplier_ID
-                                   FROM inventory
-                                   WHERE stock_on_hand <= reorder_level
-                                   ORDER BY stock_on_hand ASC
-                                   """, connection)
-        else:
-            df = pd.read_sql_query("""
-                                   SELECT product_Name, stock_on_hand, reorder_level, reorder_quantity
-                                   FROM inventory
-                                   WHERE stock_on_hand <= reorder_level
-                                   ORDER BY stock_on_hand ASC
-                                   """, connection)
-
-        if df.empty:
-            return pd.DataFrame()
-        return df
-    except Exception as e:
-        st.error(f"Error checking low stock: {str(e)}")
-        return pd.DataFrame()
-    finally:
-        connection.close()
-
-
-def get_reorder_recommendations():
-    """Get reorder recommendations based on current stock levels"""
-    connection = sqlite3.connect("global.db")
-    try:
-        # Check columns in inventory table
-        cursor = connection.cursor()
-        cursor.execute("PRAGMA table_info(inventory)")
-        inventory_columns = [col[1] for col in cursor.fetchall()]
-
-        # Check if supplier_ID exists in inventory
-        if 'supplier_ID' in inventory_columns:
-            df = pd.read_sql_query("""
-                                   SELECT i.product_Name,
-                                          i.stock_on_hand,
-                                          i.reorder_level,
-                                          i.reorder_quantity,
-                                          i.supplier_ID,
-                                          s.supplier_Name
-                                   FROM inventory i
-                                            LEFT JOIN suppliers s ON i.supplier_ID = s.supplier_ID
-                                   WHERE i.stock_on_hand <= i.reorder_level
-                                   ORDER BY (i.reorder_level - i.stock_on_hand) DESC
-                                   """, connection)
-        else:
-            # If supplier_ID not in inventory, get from product table
-            df = pd.read_sql_query("""
-                                   SELECT i.product_Name,
-                                          i.stock_on_hand,
-                                          i.reorder_level,
-                                          i.reorder_quantity,
-                                          p.supplier_ID,
-                                          s.supplier_Name
-                                   FROM inventory i
-                                            LEFT JOIN product p ON i.product_ID = p.product_ID
-                                            LEFT JOIN suppliers s ON p.supplier_ID = s.supplier_ID
-                                   WHERE i.stock_on_hand <= i.reorder_level
-                                   ORDER BY (i.reorder_level - i.stock_on_hand) DESC
-                                   """, connection)
-
-        if df.empty:
-            return pd.DataFrame()
-        return df
-    except Exception as e:
-        st.error(f"Error getting reorder recommendations: {str(e)}")
-        return pd.DataFrame()
-    finally:
-        connection.close()
-
-
-# -----------------------
-# INVENTORY UPDATE FUNCTIONS (No caching needed for updates)
-# -----------------------
-def update_inventory(product_id, quantity_sold):
-    """Automatically update inventory when a sale is made"""
-    connection = sqlite3.connect("global.db")
-    cursor = connection.cursor()
-
-    try:
-        # Get current stock
-        cursor.execute("SELECT stock_on_hand, product_Name FROM inventory WHERE product_ID = ?", (product_id,))
-        result = cursor.fetchone()
-
-        if result:
-            current_stock, product_name = result
-            new_stock = current_stock - quantity_sold
-
-            if new_stock < 0:
-                return False, f"Insufficient stock for {product_name}. Only {current_stock} units available."
-
-            # Update inventory
-            cursor.execute("""
-                           UPDATE inventory
-                           SET stock_on_hand = ?,
-                               last_updated  = ?
-                           WHERE product_ID = ?
-                           """, (new_stock, datetime.now().strftime("%Y-%m-%d"), product_id))
-
-            connection.commit()
-
-            # Clear cache to refresh data
-            st.cache_data.clear()
-
-            # Check if reorder is needed
-            cursor.execute("""
-                           SELECT reorder_level, reorder_quantity
-                           FROM inventory
-                           WHERE product_ID = ?
-                           """, (product_id,))
-            reorder_info = cursor.fetchone()
-
-            if reorder_info and new_stock <= reorder_info[0]:
-                return True, f"Stock updated. {product_name} is below reorder level! Consider reordering {reorder_info[1]} units."
-
-            return True, f"Stock updated successfully. {product_name} now has {new_stock} units."
-
-        return False, f"Product {product_id} not found in inventory."
-
-    except Exception as e:
-        return False, f"Error updating inventory: {str(e)}"
-    finally:
-        connection.close()
-
-
-# -----------------------
-# INVOICE GENERATION FUNCTIONS
-# -----------------------
-def generate_invoice_pdf(invoice_data):
-    """Generate PDF invoice using ReportLab"""
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
-    styles = getSampleStyleSheet()
-    story = []
-
-    # Company Header
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=24,
-        textColor=colors.HexColor('#2c3e50'),
-        alignment=1
-    )
-
-    story.append(Paragraph("Global Trends", title_style))
-    story.append(Paragraph("Invoice", styles['Heading2']))
-    story.append(Spacer(1, 0.2 * inch))
-
-    # Invoice Details
-    invoice_details = [
-        ["Invoice Number:", invoice_data.get('invoice_number', 'INV-001')],
-        ["Invoice Date:", invoice_data.get('invoice_date', datetime.now().strftime("%Y-%m-%d"))],
-        ["Due Date:", invoice_data.get('due_date', (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"))],
-        ["Customer:", invoice_data.get('customer_name', '')],
-        ["Customer Type:", invoice_data.get('customer_type', 'Individual')]
-    ]
-
-    details_table = Table(invoice_details, colWidths=[2 * inch, 4 * inch])
-    details_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
-        ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-    ]))
-    story.append(details_table)
-    story.append(Spacer(1, 0.2 * inch))
-
-    # Items Table
-    items_data = [["Item", "Description", "Quantity", "Unit Price (R)", "Total (R)"]]
-
-    for item in invoice_data.get('items', []):
-        items_data.append([
-            item.get('item_code', ''),
-            item.get('description', ''),
-            item.get('quantity', 0),
-            f"{item.get('unit_price', 0):,.2f}",
-            f"{item.get('total', 0):,.2f}"
-        ])
-
-    # Add subtotal and total
-    items_data.append(["", "", "", "Subtotal:", f"{invoice_data.get('subtotal', 0):,.2f}"])
-    items_data.append(["", "", "", "VAT (15%):", f"{invoice_data.get('vat', 0):,.2f}"])
-    items_data.append(["", "", "", "Total:", f"{invoice_data.get('total', 0):,.2f}"])
-
-    items_table = Table(items_data, colWidths=[1.2 * inch, 2.5 * inch, 0.8 * inch, 1.2 * inch, 1.2 * inch])
-    items_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('ALIGN', (3, 0), (4, -1), 'RIGHT'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('GRID', (0, 0), (-1, -3), 0.5, colors.grey),
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3498db')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('BACKGROUND', (0, -3), (-1, -1), colors.HexColor('#ecf0f1')),
-        ('FONTNAME', (0, -3), (-1, -1), 'Helvetica-Bold'),
-    ]))
-    story.append(items_table)
-    story.append(Spacer(1, 0.3 * inch))
-
-    # Payment Instructions
-    payment_instructions = [
-        ["Payment Instructions"],
-        ["Bank: First National Bank (FNB)"],
-        ["Account Name: Global Trends"],
-        ["Account Number: 628 123 456 78"],
-        ["Branch Code: 250655"],
-        ["Reference: " + invoice_data.get('invoice_number', 'INV-001')]
-    ]
-
-    payment_table = Table(payment_instructions, colWidths=[5.5 * inch])
-    payment_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-    ]))
-    story.append(payment_table)
-
-    # Build PDF
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
-
-
-def save_invoice_to_database(invoice_data):
-    """Save invoice record to database"""
-    connection = sqlite3.connect("global.db")
-    cursor = connection.cursor()
-
-    try:
-        cursor.execute("""
-                       INSERT INTO accounts_receivable
-                       (receivable_ID, customer_ID, customer_Name, invoice_Date, due_Date,
-                        invoice_Amount, amount_Paid, outstanding_Balance, status)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                       """, (
-                           invoice_data.get('invoice_number', ''),
-                           invoice_data.get('customer_id', ''),
-                           invoice_data.get('customer_name', ''),
-                           invoice_data.get('invoice_date', datetime.now().strftime("%Y-%m-%d")),
-                           invoice_data.get('due_date', (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")),
-                           invoice_data.get('total', 0),
-                           0,
-                           invoice_data.get('total', 0),
-                           'Current'
-                       ))
-        connection.commit()
-
-        # Clear cache for financial data
-        st.cache_data.clear()
-
-        return True
-    except Exception as e:
-        print(f"Error saving invoice: {e}")
-        return False
-    finally:
-        connection.close()
-
-
-def send_invoice_email(invoice_pdf, invoice_data, recipient_email):
-    """Send invoice via email"""
+def send_email_notification(subject, body, recipient=None):
     if not EMAIL_CONFIG['sender_email'] or not EMAIL_CONFIG['sender_password']:
-        return False, "Email credentials not configured. Please set SENDER_EMAIL and SENDER_PASSWORD."
-
+        return False, "Email not configured"
     try:
-        # Create email
+        to = recipient or EMAIL_CONFIG['sender_email']
         msg = MIMEMultipart()
         msg['From'] = EMAIL_CONFIG['sender_email']
-        msg['To'] = recipient_email
-        msg['Subject'] = f"Invoice {invoice_data['invoice_number']} from Global Trends"
-
-        # Email body
-        body = f"""
-        Dear {invoice_data['customer_name']},
-
-        Please find attached invoice {invoice_data['invoice_number']} for your recent purchase from Global Trends.
-
-        Invoice Details:
-        - Invoice Date: {invoice_data['invoice_date']}
-        - Due Date: {invoice_data['due_date']}
-        - Total Amount: R{invoice_data['total']:,.2f}
-
-        Payment can be made via EFT using the banking details provided in the invoice.
-
-        If you have any questions, please don't hesitate to contact us.
-
-        Thank you for your business!
-
-        Regards,
-        Global Trends Team
-        """
-
+        msg['To'] = to
+        msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
-
-        # Attach PDF
-        attachment = MIMEBase('application', 'pdf')
-        attachment.set_payload(invoice_pdf.read())
-        encoders.encode_base64(attachment)
-        attachment.add_header('Content-Disposition',
-                              f'attachment; filename=invoice_{invoice_data["invoice_number"]}.pdf')
-        msg.attach(attachment)
-
-        # Send email
         server = smtplib.SMTP(EMAIL_CONFIG['smtp_server'], EMAIL_CONFIG['smtp_port'])
         server.starttls()
         server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
         server.send_message(msg)
         server.quit()
-
-        return True, "Invoice sent successfully!"
-
+        return True, "Email sent"
     except Exception as e:
-        return False, f"Error sending email: {str(e)}"
+        return False, str(e)
 
 
-# -----------------------
-# SALE PROCESSING FUNCTION
-# -----------------------
-def process_sale(customer_id, customer_name, customer_type, items, recipient_email=None):
-    """Process a sale with automatic inventory update and invoice generation"""
-
-    # Calculate totals
-    subtotal = sum(item['quantity'] * item['unit_price'] for item in items)
-    vat = subtotal * 0.15
-    total = subtotal + vat
-
-    # Generate invoice number
-    invoice_number = f"INV-{datetime.now().strftime('%Y%m%d')}-{customer_id}"
-
-    # Prepare invoice data
-    invoice_data = {
-        'invoice_number': invoice_number,
-        'invoice_date': datetime.now().strftime("%Y-%m-%d"),
-        'due_date': (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
-        'customer_id': customer_id,
-        'customer_name': customer_name,
-        'customer_type': customer_type,
-        'items': items,
-        'subtotal': subtotal,
-        'vat': vat,
-        'total': total
-    }
-
-    # Update inventory for each item
-    inventory_updates = []
-    for item in items:
-        success, message = update_inventory(item['product_id'], item['quantity'])
-        inventory_updates.append({
-            'product': item['description'],
-            'success': success,
-            'message': message
-        })
-
-    # Check if all inventory updates were successful
-    all_successful = all(update['success'] for update in inventory_updates)
-
-    if not all_successful:
-        return {
-            'success': False,
-            'message': "Inventory update failed for some items",
-            'details': inventory_updates
-        }
-
-    # Save invoice to database
-    if save_invoice_to_database(invoice_data):
-        # Generate PDF
-        invoice_pdf = generate_invoice_pdf(invoice_data)
-
-        # Send email if recipient provided
-        email_status = None
-        if recipient_email:
-            email_success, email_message = send_invoice_email(invoice_pdf, invoice_data, recipient_email)
-            email_status = {'success': email_success, 'message': email_message}
-
-        return {
-            'success': True,
-            'invoice_data': invoice_data,
-            'invoice_pdf': invoice_pdf,
-            'inventory_updates': inventory_updates,
-            'email_status': email_status,
-            'message': f"Sale processed successfully! Invoice {invoice_number} created."
-        }
-
-    return {
-        'success': False,
-        'message': "Failed to save invoice to database"
-    }
-
-
-# -----------------------
-# TOOLS
-# -----------------------
-def query_database(query):
-    """Execute SQL queries safely"""
-    connection = sqlite3.connect("global.db")
+def send_whatsapp_notification(message, phone=None):
+    twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
+    twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "")
+    twilio_whatsapp = os.getenv("TWILIO_WHATSAPP_FROM", "")
+    owner_phone = phone or os.getenv("OWNER_WHATSAPP", "")
+    if not all([twilio_sid, twilio_token, twilio_whatsapp, owner_phone]):
+        return False, "WhatsApp (Twilio) not configured — add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM, OWNER_WHATSAPP to secrets"
     try:
-        # For safety, only allow SELECT queries
-        if query.strip().upper().startswith('SELECT'):
-            df = pd.read_sql_query(query, connection)
-            return df.to_string()
-        else:
-            return "Only SELECT queries are allowed for security reasons."
+        from twilio.rest import Client
+        client = Client(twilio_sid, twilio_token)
+        client.messages.create(body=message, from_=f"whatsapp:{twilio_whatsapp}", to=f"whatsapp:{owner_phone}")
+        return True, "WhatsApp sent"
     except Exception as e:
-        return f"Error executing query: {str(e)}"
+        return False, str(e)
+
+
+def log_agent_action(agent_name, action, result, severity="info"):
+    try:
+        conn = sqlite3.connect("global.db")
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO agent_logs (agent_name, action_taken, result, severity) VALUES (?,?,?,?)",
+                       (agent_name, action, result, severity))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def create_alert(agent_name, alert_type, message):
+    try:
+        conn = sqlite3.connect("global.db")
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO agent_alerts (agent_name, alert_type, message) VALUES (?,?,?)",
+                       (agent_name, alert_type, message))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def notify_all(subject, message, severity="info"):
+    """Send notification via all configured channels + create in-app alert"""
+    # In-app alert
+    create_alert("System", severity, message)
+    # Email
+    send_email_notification(f"[Global Trends AI] {subject}", message)
+    # WhatsApp
+    send_whatsapp_notification(f"🌍 Global Trends AI\n{subject}\n\n{message}")
+
+
+# ============================================
+# DATABASE QUERY HELPERS
+# ============================================
+@st.cache_data(ttl=60, show_spinner=False)
+def get_suppliers():
+    conn = sqlite3.connect("global.db")
+    try:
+        return pd.read_sql_query("SELECT * FROM suppliers", conn)
     finally:
-        connection.close()
+        conn.close()
 
 
-# -----------------------
-# GROQ DIRECT CLIENT
-# -----------------------
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+@st.cache_data(ttl=60, show_spinner=False)
+def get_products():
+    conn = sqlite3.connect("global.db")
+    try:
+        return pd.read_sql_query(
+            "SELECT p.*, s.supplier_Name FROM product p LEFT JOIN suppliers s ON p.supplier_ID = s.supplier_ID", conn)
+    finally:
+        conn.close()
 
-# -----------------------
-# TOOL: DATABASE QUERY
-# -----------------------
-def run_db_tool(query):
-    """Run a SELECT SQL query against the database."""
-    return query_database(query)
 
-# -----------------------
-# TOOL: DUCKDUCKGO SEARCH
-# -----------------------
+@st.cache_data(ttl=60, show_spinner=False)
+def get_retailers():
+    conn = sqlite3.connect("global.db")
+    try:
+        return pd.read_sql_query("SELECT * FROM retailers", conn)
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_customers():
+    conn = sqlite3.connect("global.db")
+    try:
+        return pd.read_sql_query("SELECT * FROM customers", conn)
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def get_inventory():
+    conn = sqlite3.connect("global.db")
+    try:
+        return pd.read_sql_query("""SELECT i.*, p.selling_Price, p.unit_Cost
+                                    FROM inventory i
+                                             LEFT JOIN product p ON i.product_ID = p.product_ID
+                                    ORDER BY i.stock_on_hand ASC""", conn)
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_financial_summary():
+    conn = sqlite3.connect("global.db")
+    try:
+        sales = pd.read_sql_query("SELECT SUM(invoice_Amount) as v FROM accounts_receivable", conn)
+        ar = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_receivable WHERE status != 'Paid'",
+                               conn)
+        ap = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_payable WHERE status != 'Paid'",
+                               conn)
+        drawings = pd.read_sql_query("SELECT SUM(amount) as v FROM drawings", conn)
+        return {
+            'total_sales': sales['v'].iloc[0] or 0,
+            'total_ar': ar['v'].iloc[0] or 0,
+            'total_ap': ap['v'].iloc[0] or 0,
+            'total_drawings': drawings['v'].iloc[0] or 0
+        }
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_performance():
+    conn = sqlite3.connect("global.db")
+    try:
+        return pd.read_sql_query("""SELECT s.supplier_Name, p.supplier_Rating, p.Priority, p.Notes
+                                    FROM performance_notes p
+                                             JOIN suppliers s ON p.supplier_ID = s.supplier_ID
+                                    ORDER BY p.supplier_Rating DESC""", conn)
+    finally:
+        conn.close()
+
+
+def query_database(query):
+    conn = sqlite3.connect("global.db")
+    try:
+        if query.strip().upper().startswith('SELECT'):
+            df = pd.read_sql_query(query, conn)
+            return df.to_string()
+        return "Only SELECT queries allowed."
+    except Exception as e:
+        return f"Error: {str(e)}"
+    finally:
+        conn.close()
+
+
+# ============================================
+# ============================================
+# 7 AUTONOMOUS AI AGENTS
+# ============================================
+# ============================================
+
+# ── AGENT 1: PROACTIVE STOCK MONITOR ──────
+def run_stock_monitor_agent():
+    """Checks inventory, reasons about urgency, sends alerts autonomously"""
+    try:
+        conn = sqlite3.connect("global.db")
+        low_stock = pd.read_sql_query("""
+                                      SELECT i.product_Name,
+                                             i.stock_on_hand,
+                                             i.reorder_level,
+                                             i.reorder_quantity,
+                                             p.supplier_ID,
+                                             s.supplier_Name,
+                                             s.Account
+                                      FROM inventory i
+                                               LEFT JOIN product p ON i.product_ID = p.product_ID
+                                               LEFT JOIN suppliers s ON p.supplier_ID = s.supplier_ID
+                                      WHERE i.stock_on_hand <= i.reorder_level
+                                      """, conn)
+        critical = pd.read_sql_query("""
+                                     SELECT product_Name, stock_on_hand, reorder_level
+                                     FROM inventory
+                                     WHERE stock_on_hand = 0
+                                     """, conn)
+        conn.close()
+
+        actions_taken = []
+
+        if low_stock.empty:
+            log_agent_action("Stock Monitor", "Inventory check", "All stock levels healthy ✅", "info")
+            return {"status": "healthy", "alerts": [], "low_stock": pd.DataFrame()}
+
+        # Reason about urgency using Groq
+        stock_summary = low_stock[
+            ['product_Name', 'stock_on_hand', 'reorder_level', 'reorder_quantity', 'supplier_Name']].to_string()
+        reasoning = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{
+                "role": "user",
+                "content": f"""You are an inventory management agent for Global Trends.
+
+Analyze this low stock situation and provide:
+1. Urgency level (CRITICAL/HIGH/MEDIUM) for each item
+2. Recommended action for each
+3. One sentence summary for business owner
+
+Low stock items:
+{stock_summary}
+
+Format as: ITEM | URGENCY | ACTION
+Then: SUMMARY: <one sentence>"""
+            }],
+            max_tokens=500, temperature=0.1
+        ).choices[0].message.content
+
+        # Create alerts for each low stock item
+        for _, row in low_stock.iterrows():
+            msg = f"⚠️ LOW STOCK: {row['product_Name']} has {row['stock_on_hand']} units (reorder level: {row['reorder_level']}). Supplier: {row['supplier_Name']}. Reorder {row['reorder_quantity']} units."
+            create_alert("Stock Monitor", "low_stock", msg)
+            actions_taken.append(msg)
+
+        if not critical.empty:
+            for _, row in critical.iterrows():
+                msg = f"🚨 CRITICAL: {row['product_Name']} is OUT OF STOCK!"
+                create_alert("Stock Monitor", "critical_stock", msg)
+                notify_all("CRITICAL: Out of Stock", msg, "critical")
+
+        # Send consolidated notification
+        summary_msg = f"Stock Monitor Agent Report\n\n{len(low_stock)} products below reorder level.\n\nAI Analysis:\n{reasoning}"
+        send_email_notification("⚠️ Stock Alert - Action Required", summary_msg)
+        send_whatsapp_notification(f"⚠️ Stock Alert: {len(low_stock)} products need reordering. Check your dashboard.")
+
+        log_agent_action("Stock Monitor", f"Checked inventory, found {len(low_stock)} low stock items",
+                         f"Notifications sent. {reasoning[:200]}", "warning")
+
+        return {"status": "alerts", "alerts": actions_taken, "reasoning": reasoning, "low_stock": low_stock}
+
+    except Exception as e:
+        log_agent_action("Stock Monitor", "Inventory check failed", str(e), "error")
+        return {"status": "error", "error": str(e)}
+
+
+# ── AGENT 2: ACCOUNTS RECEIVABLE COLLECTION ──
+def run_ar_collection_agent():
+    """Autonomously monitors overdue invoices and escalates collection actions"""
+    try:
+        conn = sqlite3.connect("global.db")
+        overdue = pd.read_sql_query("""
+                                    SELECT receivable_ID,
+                                           customer_Name,
+                                           customer_ID,
+                                           due_Date,
+                                           outstanding_Balance,
+                                           invoice_Date,
+                                           CAST(julianday('now') - julianday(due_Date) AS INTEGER) as days_overdue
+                                    FROM accounts_receivable
+                                    WHERE status != 'Paid' AND outstanding_Balance > 0
+            AND due_Date < date('now')
+                                    ORDER BY days_overdue DESC
+                                    """, conn)
+        conn.close()
+
+        if overdue.empty:
+            log_agent_action("AR Collection", "Checked receivables", "No overdue invoices ✅", "info")
+            return {"status": "healthy", "overdue": pd.DataFrame(), "actions": []}
+
+        actions = []
+        for _, row in overdue.iterrows():
+            days = int(row['days_overdue']) if pd.notna(row['days_overdue']) else 0
+            amount = float(row['outstanding_Balance'])
+            customer = row['customer_Name']
+            inv_id = row['receivable_ID']
+
+            if days >= 30:
+                # ESCALATION — final notice
+                msg = f"🚨 FINAL NOTICE [{inv_id}]: {customer} owes R{amount:,.2f} — {days} days overdue. Escalate immediately."
+                create_alert("AR Collection", "final_notice", msg)
+                notify_all(f"Final Notice: {customer}", msg, "critical")
+                actions.append({"customer": customer, "action": "Final notice sent", "days": days, "amount": amount})
+
+            elif days >= 14:
+                # Firm reminder
+                msg = f"⚠️ FIRM REMINDER [{inv_id}]: {customer} owes R{amount:,.2f} — {days} days overdue."
+                create_alert("AR Collection", "firm_reminder", msg)
+                send_email_notification(f"Overdue Invoice Reminder - {customer}", msg)
+                actions.append({"customer": customer, "action": "Firm reminder sent", "days": days, "amount": amount})
+
+            elif days >= 7:
+                # Gentle reminder
+                msg = f"📬 REMINDER [{inv_id}]: {customer} has an outstanding balance of R{amount:,.2f} — {days} days overdue."
+                create_alert("AR Collection", "gentle_reminder", msg)
+                actions.append(
+                    {"customer": customer, "action": "Gentle reminder logged", "days": days, "amount": amount})
+
+        total_overdue = overdue['outstanding_Balance'].sum()
+        log_agent_action("AR Collection", f"Processed {len(overdue)} overdue invoices",
+                         f"Total at risk: R{total_overdue:,.2f}. Actions: {len(actions)}", "warning")
+
+        return {"status": "overdue_found", "overdue": overdue, "actions": actions, "total": total_overdue}
+
+    except Exception as e:
+        log_agent_action("AR Collection", "Failed", str(e), "error")
+        return {"status": "error", "error": str(e)}
+
+
+# ── AGENT 3: SUPPLIER PERFORMANCE AGENT ──
+def run_supplier_performance_agent():
+    """Evaluates supplier reliability, detects underperformers, recommends changes"""
+    try:
+        conn = sqlite3.connect("global.db")
+        suppliers = pd.read_sql_query("""
+                                      SELECT s.supplier_ID,
+                                             s.supplier_Name,
+                                             p.supplier_Rating,
+                                             p.Priority,
+                                             p.Notes,
+                                             COUNT(ap.payable_ID)   as invoice_count,
+                                             SUM(ap.invoice_Amount) as total_spent
+                                      FROM suppliers s
+                                               LEFT JOIN performance_notes p ON s.supplier_ID = p.supplier_ID
+                                               LEFT JOIN accounts_payable ap ON s.supplier_ID = ap.supplier_ID
+                                      GROUP BY s.supplier_ID
+                                      """, conn)
+        conn.close()
+
+        # Ask AI to reason about supplier health
+        supplier_data = suppliers[['supplier_Name', 'supplier_Rating', 'Priority', 'total_spent']].to_string()
+        analysis = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{
+                "role": "user",
+                "content": f"""You are a supplier performance agent for Global Trends.
+
+Analyze these suppliers and:
+1. Identify any underperforming suppliers (rating < 4)
+2. Recommend priority changes if needed
+3. Flag any risks
+4. Suggest one strategic action
+
+Supplier data:
+{supplier_data}
+
+Be concise. Format as:
+HEALTH: Good/At Risk/Critical
+UNDERPERFORMERS: <list or None>
+RISKS: <list or None>
+RECOMMENDATION: <one action>"""
+            }],
+            max_tokens=400, temperature=0.1
+        ).choices[0].message.content
+
+        # Flag low-rated suppliers
+        alerts = []
+        if not suppliers.empty:
+            low_rated = suppliers[pd.to_numeric(suppliers['supplier_Rating'], errors='coerce') < 4]
+            for _, row in low_rated.iterrows():
+                msg = f"⚠️ Supplier {row['supplier_Name']} has a low rating of {row['supplier_Rating']}⭐. Consider reviewing or finding alternatives."
+                create_alert("Supplier Performance", "low_rating", msg)
+                alerts.append(msg)
+
+        log_agent_action("Supplier Performance", "Evaluated all suppliers", analysis[:300], "info")
+        return {"status": "complete", "analysis": analysis, "suppliers": suppliers, "alerts": alerts}
+
+    except Exception as e:
+        log_agent_action("Supplier Performance", "Failed", str(e), "error")
+        return {"status": "error", "error": str(e)}
+
+
+# ── AGENT 4: SALES TREND & DEMAND FORECASTING ──
+def run_sales_forecasting_agent():
+    """Analyses transaction history, detects trends, adjusts reorder recommendations"""
+    try:
+        conn = sqlite3.connect("global.db")
+        sales = pd.read_sql_query("""
+                                  SELECT t.date, t.description, t.amount, t.category
+                                  FROM transactions t
+                                  WHERE t.category IN ('Sale', 'Cost')
+                                  ORDER BY t.date
+                                  """, conn)
+        inventory = pd.read_sql_query("""
+                                      SELECT i.product_Name,
+                                             i.stock_on_hand,
+                                             i.reorder_quantity,
+                                             p.selling_Price,
+                                             p.unit_Cost
+                                      FROM inventory i
+                                               JOIN product p ON i.product_ID = p.product_ID
+                                      """, conn)
+        conn.close()
+
+        sales_summary = f"Total transactions: {len(sales)}\nTotal sales value: R{sales[sales['category'] == 'Sale']['amount'].sum():,.2f}"
+        inv_summary = inventory[['product_Name', 'stock_on_hand', 'reorder_quantity']].to_string()
+
+        forecast = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{
+                "role": "user",
+                "content": f"""You are a sales forecasting agent for Global Trends, a home goods trading company.
+
+Based on the sales data and inventory below, provide:
+1. Top performing product categories (infer from descriptions)
+2. Demand trend (growing/stable/declining)
+3. Stock recommendations — which products to increase reorder quantities for
+4. Revenue forecast for next 30 days
+5. One strategic insight
+
+Sales data:
+{sales_summary}
+
+Current inventory:
+{inv_summary}
+
+Be specific and actionable. Keep it concise."""
+            }],
+            max_tokens=500, temperature=0.2
+        ).choices[0].message.content
+
+        create_alert("Sales Forecasting", "forecast_ready", f"📈 New forecast generated: {forecast[:150]}...")
+        log_agent_action("Sales Forecasting", "Generated demand forecast", forecast[:300], "info")
+
+        return {"status": "complete", "forecast": forecast, "sales": sales, "inventory": inventory}
+
+    except Exception as e:
+        log_agent_action("Sales Forecasting", "Failed", str(e), "error")
+        return {"status": "error", "error": str(e)}
+
+
+# ── AGENT 5: CUSTOMER RELATIONSHIP AGENT ──
+def run_crm_agent():
+    """Detects at-risk customers, identifies top customers, generates outreach"""
+    try:
+        conn = sqlite3.connect("global.db")
+        customers = pd.read_sql_query("""
+                                      SELECT customer_ID,
+                                             customer_Name,
+                                             email,
+                                             contact_Number,
+                                             total_orders,
+                                             total_spent,
+                                             outstanding_balance,
+                                             last_order_date,
+                                             CAST(julianday('now') -
+                                                  julianday(COALESCE(last_order_date, '2025-01-01')) AS INTEGER) as days_since_order
+                                      FROM customers
+                                      ORDER BY total_spent DESC
+                                      """, conn)
+        conn.close()
+
+        actions = []
+
+        # Detect churning customers (no order in 30+ days)
+        if 'days_since_order' in customers.columns:
+            at_risk = customers[customers['days_since_order'] >= 30]
+            for _, row in at_risk.iterrows():
+                days = int(row['days_since_order']) if pd.notna(row['days_since_order']) else 0
+                msg = f"👤 AT RISK: {row['customer_Name']} hasn't ordered in {days} days. Last spent R{row['total_spent']:,.2f} total."
+                create_alert("CRM Agent", "churn_risk", msg)
+                actions.append({"customer": row['customer_Name'], "issue": "churn_risk", "days": days})
+
+        # Top customers recognition
+        top = customers.nlargest(3, 'total_spent')
+        top_names = ", ".join(top['customer_Name'].tolist())
+
+        # AI generates personalised outreach strategy
+        customer_data = customers[['customer_Name', 'total_orders', 'total_spent', 'days_since_order']].to_string()
+        strategy = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{
+                "role": "user",
+                "content": f"""You are a customer relationship agent for Global Trends.
+
+Analyze these customers and:
+1. Identify the top 3 VIP customers worth nurturing
+2. List customers at churn risk and why
+3. Suggest one retention promotion or offer
+4. Recommend one upsell opportunity
+
+Customer data:
+{customer_data}
+
+Be concise and specific."""
+            }],
+            max_tokens=400, temperature=0.2
+        ).choices[0].message.content
+
+        log_agent_action("CRM Agent",
+                         f"Analyzed {len(customers)} customers, {len(at_risk) if 'days_since_order' in customers.columns else 0} at churn risk",
+                         strategy[:300], "info")
+
+        return {"status": "complete", "strategy": strategy, "customers": customers, "actions": actions,
+                "top_customers": top_names}
+
+    except Exception as e:
+        log_agent_action("CRM Agent", "Failed", str(e), "error")
+        return {"status": "error", "error": str(e)}
+
+
+# ── AGENT 6: FINANCIAL HEALTH MONITOR ──
+def run_financial_health_agent():
+    """Monitors cash flow, AR/AP ratios, flags financial risks proactively"""
+    try:
+        conn = sqlite3.connect("global.db")
+        ar = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_receivable WHERE status != 'Paid'",
+                               conn)
+        ap = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_payable WHERE status != 'Paid'",
+                               conn)
+        cash = pd.read_sql_query(
+            "SELECT SUM(balance) as v FROM chart_of_accounts WHERE account_Type = 'Asset' AND account_Name LIKE '%Cash%'",
+            conn)
+        drawings = pd.read_sql_query("SELECT SUM(amount) as v FROM drawings", conn)
+        revenue = pd.read_sql_query("SELECT SUM(invoice_Amount) as v FROM accounts_receivable", conn)
+        expenses = pd.read_sql_query("SELECT SUM(amount) as v FROM transactions WHERE category = 'Expense'", conn)
+        conn.close()
+
+        total_ar = float(ar['v'].iloc[0] or 0)
+        total_ap = float(ap['v'].iloc[0] or 0)
+        total_cash = float(cash['v'].iloc[0] or 0)
+        total_drawings = float(drawings['v'].iloc[0] or 0)
+        total_revenue = float(revenue['v'].iloc[0] or 0)
+        total_expenses = float(expenses['v'].iloc[0] or 0)
+
+        metrics = {
+            "total_ar": total_ar,
+            "total_ap": total_ap,
+            "total_cash": total_cash,
+            "total_drawings": total_drawings,
+            "total_revenue": total_revenue,
+            "total_expenses": total_expenses,
+            "net_cashflow": total_ar - total_ap,
+            "drawings_to_revenue_pct": (total_drawings / total_revenue * 100) if total_revenue > 0 else 0
+        }
+
+        financial_summary = f"""
+AR Outstanding: R{total_ar:,.2f}
+AP Outstanding: R{total_ap:,.2f}
+Cash on Hand: R{total_cash:,.2f}
+Owner Drawings: R{total_drawings:,.2f}
+Total Revenue: R{total_revenue:,.2f}
+Total Expenses: R{total_expenses:,.2f}
+Net Cash Position: R{total_ar - total_ap:,.2f}
+"""
+        analysis = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{
+                "role": "user",
+                "content": f"""You are a financial health monitoring agent for Global Trends.
+
+Analyze this financial snapshot and:
+1. Rate overall financial health (Excellent/Good/At Risk/Critical)
+2. Identify the top 2 financial risks
+3. Flag if drawings are unsustainably high
+4. Recommend one immediate action
+5. Forecast cash flow risk for next 30 days
+
+Financial data:
+{financial_summary}
+
+Be specific and direct."""
+            }],
+            max_tokens=400, temperature=0.1
+        ).choices[0].message.content
+
+        # Auto-alert if AP > AR (cash flow risk)
+        if total_ap > total_ar:
+            msg = f"🚨 CASH FLOW RISK: Payables (R{total_ap:,.2f}) exceed receivables (R{total_ar:,.2f}). Immediate action needed."
+            notify_all("Cash Flow Risk Detected", msg, "critical")
+
+        # Alert if drawings > 20% of revenue
+        if metrics['drawings_to_revenue_pct'] > 20:
+            msg = f"⚠️ DRAWINGS ALERT: Owner drawings are {metrics['drawings_to_revenue_pct']:.1f}% of revenue — above the 20% threshold."
+            create_alert("Financial Health", "high_drawings", msg)
+
+        log_agent_action("Financial Health", "Financial snapshot analysis", analysis[:300], "info")
+        return {"status": "complete", "analysis": analysis, "metrics": metrics}
+
+    except Exception as e:
+        log_agent_action("Financial Health", "Failed", str(e), "error")
+        return {"status": "error", "error": str(e)}
+
+
+# ── AGENT 7: MULTI-STEP GOAL PLANNING ──
+def run_goal_planning_agent(goal):
+    """Given a high-level business goal, breaks it into steps and executes them"""
+    try:
+        # Gather all business context
+        conn = sqlite3.connect("global.db")
+        inv_summary = pd.read_sql_query("SELECT product_Name, stock_on_hand, reorder_quantity FROM inventory",
+                                        conn).to_string()
+        fin_summary = pd.read_sql_query("SELECT account_Name, account_Type, balance FROM chart_of_accounts",
+                                        conn).to_string()
+        sales_summary = pd.read_sql_query("SELECT category, SUM(amount) as total FROM transactions GROUP BY category",
+                                          conn).to_string()
+        supplier_summary = pd.read_sql_query("SELECT supplier_Name, products FROM suppliers", conn).to_string()
+        conn.close()
+
+        # Step 1: Break goal into sub-tasks
+        plan = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{
+                "role": "user",
+                "content": f"""You are a strategic planning agent for Global Trends, a home goods trading company in South Africa.
+
+Business Goal: {goal}
+
+Current Business Context:
+INVENTORY: {inv_summary}
+FINANCES: {fin_summary}
+SALES: {sales_summary}
+SUPPLIERS: {supplier_summary}
+
+Create a detailed action plan with:
+1. GOAL ANALYSIS: What does achieving this goal require?
+2. SUB-TASKS: List 4-6 specific, actionable steps (numbered)
+3. RESOURCES NEEDED: Budget, stock, people
+4. TIMELINE: Realistic timeline for each step
+5. SUCCESS METRICS: How will we know it's achieved?
+6. RISKS: Top 2 risks and mitigations
+
+Be specific to Global Trends' actual data above."""
+            }],
+            max_tokens=800, temperature=0.3
+        ).choices[0].message.content
+
+        # Step 2: Extract and execute database queries for relevant data
+        data_queries = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{
+                "role": "user",
+                "content": f"""Based on this business goal: {goal}
+
+Write 2 SQL SELECT queries that would give the most useful data to support this goal.
+Use these tables: inventory, product, suppliers, customers, transactions, accounts_receivable
+
+Return ONLY the SQL, one per line, no explanation."""
+            }],
+            max_tokens=200, temperature=0.1
+        ).choices[0].message.content
+
+        query_results = []
+        for line in data_queries.strip().split('\n'):
+            line = line.strip()
+            if line.upper().startswith('SELECT'):
+                result = query_database(line)
+                query_results.append(result[:500])
+
+        create_alert("Goal Planner", "plan_ready", f"📋 New plan for: {goal[:50]}...")
+        log_agent_action("Goal Planner", f"Created plan for: {goal}", plan[:300], "info")
+
+        return {"status": "complete", "goal": goal, "plan": plan, "data": query_results}
+
+    except Exception as e:
+        log_agent_action("Goal Planner", f"Failed for goal: {goal}", str(e), "error")
+        return {"status": "error", "error": str(e)}
+
+
+# ============================================
+# REACT CHAT AGENT
+# ============================================
 def run_web_search(query):
-    """Search the web using DuckDuckGo."""
     try:
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=5))
             if not results:
                 return "No results found."
-            output = ""
-            for r in results:
-                output += f"Title: {r.get('title', '')}\nSnippet: {r.get('body', '')}\nURL: {r.get('href', '')}\n\n"
-            return output.strip()
+            return "\n\n".join([f"Title: {r.get('title', '')}\nSnippet: {r.get('body', '')}" for r in results])
     except Exception as e:
         return f"Search error: {str(e)}"
 
-# -----------------------
-# REACT AGENT LOOP (Groq Direct)
-# -----------------------
+
 def run_react_agent(user_question, max_iterations=6):
-    """
-    Manual ReAct (Reason + Act) agent loop using Groq directly.
-    The agent reasons step by step, chooses a tool, observes the result,
-    and repeats until it has a Final Answer.
-    """
     system_prompt = """You are a helpful AI assistant for Global Trends, a trading company.
 You have access to two tools:
+1. Database_Query - Query the SQLite database with SELECT statements.
+   Tables: suppliers, product, retailers, customers, inventory, chart_of_accounts,
+   accounts_receivable, accounts_payable, drawings, transactions, performance_notes
+2. Web_Search - Search the internet for market info.
 
-1. Database_Query - Query the company's SQLite database. Input must be a valid SQL SELECT statement.
-   Tables available:
-   - suppliers: supplier_ID, supplier_Name, Account, wechat_Contact, Website, products
-   - product: product_ID, product_Categories, products_ID, supplier_ID, supplier_Type, MOQ, lead_Times, unit_Cost, selling_Price
-   - retailers: retailer_ID, retailer_Name, status, order_Quantity, product, order_Status, management_Contacts, payment_Terms
-   - customers: customer_ID, customer_Name, contact_Number, email, total_orders, total_spent, outstanding_balance
-   - inventory: inventory_ID, product_ID, product_Name, stock_on_hand, reorder_level, reorder_quantity, location, last_updated
-   - chart_of_accounts: account_ID, account_Name, account_Type, balance
-   - accounts_receivable: receivable_ID, customer_ID, customer_Name, invoice_Date, due_Date, invoice_Amount, outstanding_Balance, status
-   - accounts_payable: payable_ID, supplier_ID, supplier_Name, invoice_Date, due_Date, invoice_Amount, outstanding_Balance, status
-   - drawings: drawing_ID, date, amount, description
-   - transactions: transaction_ID, date, description, account_Debit, account_Credit, amount, category
+Format EXACTLY:
+Thought: <reasoning>
+Action: <Database_Query or Web_Search>
+Action Input: <sql or search query>
+Observation: <filled in for you>
 
-2. Web_Search - Search the internet for current market trends, prices, or external information. Input is a plain search query string.
-
-You must follow this EXACT format for every step:
-
-Thought: <your reasoning about what to do next>
-Action: <either Database_Query or Web_Search>
-Action Input: <the SQL query or search string>
-Observation: <this will be filled in for you>
-
-When you have enough information to answer, respond with:
+When done:
 Thought: I now know the final answer
-Final Answer: <your complete answer to the user>
-
-Never skip the Thought step. Never make up observations — wait for them."""
+Final Answer: <answer>"""
 
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"Question: {user_question}\nThought:"}
     ]
 
-    for i in range(max_iterations):
+    for _ in range(max_iterations):
         response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=0.2,
-            max_tokens=1000,
-            stop=["Observation:"]  # Stop when agent expects a tool result
+            model="llama-3.3-70b-versatile", messages=messages,
+            temperature=0.2, max_tokens=1000, stop=["Observation:"]
         )
+        text = response.choices[0].message.content.strip()
+        messages.append({"role": "assistant", "content": text})
 
-        assistant_text = response.choices[0].message.content.strip()
-        messages.append({"role": "assistant", "content": assistant_text})
+        if "Final Answer:" in text:
+            return text.split("Final Answer:")[-1].strip()
 
-        # Check if we have a Final Answer
-        if "Final Answer:" in assistant_text:
-            final = assistant_text.split("Final Answer:")[-1].strip()
-            return final
-
-        # Parse Action and Action Input
-        action = None
-        action_input = None
-
-        for line in assistant_text.split("\n"):
+        action, action_input = None, None
+        for line in text.split("\n"):
             if line.startswith("Action:"):
                 action = line.replace("Action:", "").strip()
             if line.startswith("Action Input:"):
                 action_input = line.replace("Action Input:", "").strip()
 
         if not action or not action_input:
-            # Agent didn't follow format — ask it to continue
             messages.append({"role": "user", "content": "Please continue with Action and Action Input."})
             continue
 
-        # Run the chosen tool
-        if "Database" in action or "database" in action or "DB" in action:
-            observation = run_db_tool(action_input)
-        elif "Search" in action or "search" in action or "Web" in action:
+        if any(k in action.lower() for k in ["database", "db", "query"]):
+            observation = query_database(action_input)
+        elif any(k in action.lower() for k in ["search", "web"]):
             observation = run_web_search(action_input)
         else:
-            observation = f"Unknown tool '{action}'. Please use Database_Query or Web_Search."
+            observation = f"Unknown tool '{action}'."
 
-        # Feed the observation back to the agent
         messages.append({"role": "user", "content": f"Observation: {observation}\nThought:"})
 
-    return "I was unable to find a complete answer after several reasoning steps. Please try rephrasing your question."
+    return "Unable to find a complete answer. Please rephrase your question."
 
-# -----------------------
+
+# ============================================
+# INVOICE & SALE FUNCTIONS
+# ============================================
+def update_inventory(product_id, quantity_sold):
+    conn = sqlite3.connect("global.db")
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT stock_on_hand, product_Name FROM inventory WHERE product_ID = ?", (product_id,))
+        result = cursor.fetchone()
+        if result:
+            current_stock, product_name = result
+            new_stock = current_stock - quantity_sold
+            if new_stock < 0:
+                return False, f"Insufficient stock for {product_name}."
+            cursor.execute("UPDATE inventory SET stock_on_hand=?, last_updated=? WHERE product_ID=?",
+                           (new_stock, datetime.now().strftime("%Y-%m-%d"), product_id))
+            conn.commit()
+            st.cache_data.clear()
+            return True, f"Stock updated. {product_name} now has {new_stock} units."
+        return False, f"Product {product_id} not found."
+    except Exception as e:
+        return False, str(e)
+    finally:
+        conn.close()
+
+
+def generate_invoice_pdf(invoice_data):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+    story = []
+    title_style = ParagraphStyle('T', parent=styles['Heading1'], fontSize=24,
+                                 textColor=colors.HexColor('#2c3e50'), alignment=1)
+    story.append(Paragraph("Global Trends", title_style))
+    story.append(Paragraph("Invoice", styles['Heading2']))
+    story.append(Spacer(1, 0.2 * inch))
+    details = [
+        ["Invoice Number:", invoice_data.get('invoice_number', '')],
+        ["Invoice Date:", invoice_data.get('invoice_date', '')],
+        ["Due Date:", invoice_data.get('due_date', '')],
+        ["Customer:", invoice_data.get('customer_name', '')],
+    ]
+    dt = Table(details, colWidths=[2 * inch, 4 * inch])
+    dt.setStyle(TableStyle([('FONTNAME', (0, 0), (-1, -1), 'Helvetica'), ('FONTSIZE', (0, 0), (-1, -1), 10)]))
+    story.append(dt)
+    story.append(Spacer(1, 0.2 * inch))
+    items_data = [["Item", "Description", "Qty", "Unit Price (R)", "Total (R)"]]
+    for item in invoice_data.get('items', []):
+        items_data.append([item.get('item_code', ''), item.get('description', ''),
+                           item.get('quantity', 0), f"{item.get('unit_price', 0):,.2f}",
+                           f"{item.get('total', 0):,.2f}"])
+    items_data.append(["", "", "", "Subtotal:", f"{invoice_data.get('subtotal', 0):,.2f}"])
+    items_data.append(["", "", "", "VAT (15%):", f"{invoice_data.get('vat', 0):,.2f}"])
+    items_data.append(["", "", "", "Total:", f"{invoice_data.get('total', 0):,.2f}"])
+    it = Table(items_data, colWidths=[1.2 * inch, 2.5 * inch, 0.8 * inch, 1.2 * inch, 1.2 * inch])
+    it.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'), ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('GRID', (0, 0), (-1, -3), 0.5, colors.grey),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3498db')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+    ]))
+    story.append(it)
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+def save_invoice_to_database(invoice_data):
+    conn = sqlite3.connect("global.db")
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""INSERT INTO accounts_receivable
+                          (receivable_ID, customer_ID, customer_Name, invoice_Date, due_Date, invoice_Amount,
+                           amount_Paid, outstanding_Balance, status)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (invoice_data.get('invoice_number', ''), invoice_data.get('customer_id', ''),
+                        invoice_data.get('customer_name', ''), invoice_data.get('invoice_date', ''),
+                        invoice_data.get('due_date', ''), invoice_data.get('total', 0), 0,
+                        invoice_data.get('total', 0), 'Current'))
+        conn.commit()
+        st.cache_data.clear()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def process_sale(customer_id, customer_name, customer_type, items, recipient_email=None):
+    subtotal = sum(i['quantity'] * i['unit_price'] for i in items)
+    vat = subtotal * 0.15
+    total = subtotal + vat
+    invoice_number = f"INV-{datetime.now().strftime('%Y%m%d')}-{customer_id}"
+    invoice_data = {
+        'invoice_number': invoice_number, 'invoice_date': datetime.now().strftime("%Y-%m-%d"),
+        'due_date': (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+        'customer_id': customer_id, 'customer_name': customer_name,
+        'customer_type': customer_type, 'items': items,
+        'subtotal': subtotal, 'vat': vat, 'total': total
+    }
+    inventory_updates = []
+    for item in items:
+        success, message = update_inventory(item['product_id'], item['quantity'])
+        inventory_updates.append({'product': item['description'], 'success': success, 'message': message})
+    if not all(u['success'] for u in inventory_updates):
+        return {'success': False, 'message': "Inventory update failed", 'details': inventory_updates}
+    if save_invoice_to_database(invoice_data):
+        invoice_pdf = generate_invoice_pdf(invoice_data)
+        email_status = None
+        if recipient_email:
+            ok, msg = send_email_notification(
+                f"Invoice {invoice_number} from Global Trends",
+                f"Dear {customer_name},\n\nPlease find attached invoice {invoice_number}.\n\nTotal: R{total:,.2f}",
+                recipient_email)
+            email_status = {'success': ok, 'message': msg}
+        return {'success': True, 'invoice_data': invoice_data, 'invoice_pdf': invoice_pdf,
+                'inventory_updates': inventory_updates, 'email_status': email_status,
+                'message': f"Sale processed! Invoice {invoice_number} created."}
+    return {'success': False, 'message': "Failed to save invoice"}
+
+
+# ============================================
+# GET UNREAD ALERTS COUNT
+# ============================================
+def get_unread_alerts_count():
+    try:
+        conn = sqlite3.connect("global.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM agent_alerts WHERE is_read = 0")
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count
+    except:
+        return 0
+
+
+def get_all_alerts(limit=50):
+    try:
+        conn = sqlite3.connect("global.db")
+        df = pd.read_sql_query(f"SELECT * FROM agent_alerts ORDER BY timestamp DESC LIMIT {limit}", conn)
+        conn.close()
+        return df
+    except:
+        return pd.DataFrame()
+
+
+def mark_alerts_read():
+    try:
+        conn = sqlite3.connect("global.db")
+        conn.execute("UPDATE agent_alerts SET is_read = 1")
+        conn.commit()
+        conn.close()
+    except:
+        pass
+
+
+def get_agent_logs(limit=30):
+    try:
+        conn = sqlite3.connect("global.db")
+        df = pd.read_sql_query(f"SELECT * FROM agent_logs ORDER BY timestamp DESC LIMIT {limit}", conn)
+        conn.close()
+        return df
+    except:
+        return pd.DataFrame()
+
+
+# ============================================
 # STREAMLIT UI
-# -----------------------
-st.title("🌍 Global Trends AI Assistant")
+# ============================================
+unread_count = get_unread_alerts_count()
+alert_badge = f" 🔴 {unread_count}" if unread_count > 0 else ""
 
-# Sidebar for navigation
-st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to", [
+st.sidebar.markdown("""
+<div style="text-align:center; padding: 1rem 0;">
+    <h2 style="font-family: Syne, sans-serif; font-size: 1.4rem; margin:0;">🌍 Global Trends</h2>
+    <p style="color: #888; font-size: 0.8rem; margin:0;">AI Business Intelligence</p>
+</div>
+""", unsafe_allow_html=True)
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🤖 Agent Control")
+page = st.sidebar.radio("Navigate", [
+    f"🧠 Agent Command Centre{alert_badge}",
     "💬 AI Chat Assistant",
     "🛒 Process Sale",
     "📊 Supplier Dashboard",
@@ -1505,851 +1643,573 @@ page = st.sidebar.radio("Go to", [
     "➕ Add Data"
 ])
 
-# -----------------------
-# PROCESS SALE PAGE
-# -----------------------
-if page == "🛒 Process Sale":
-    st.header("🛒 Process New Sale")
-    st.markdown("Create a new sale with automatic inventory updates and invoice generation")
+# ============================================
+# AGENT COMMAND CENTRE
+# ============================================
+if "Agent Command Centre" in page:
+    st.title("🧠 Agent Command Centre")
+    st.markdown("*Autonomous AI agents monitoring, reasoning, and acting on your behalf*")
 
-    # Customer Information
-    st.subheader("Customer Information")
-    col1, col2 = st.columns(2)
+    # Unread alerts banner
+    if unread_count > 0:
+        st.markdown(
+            f'<div class="alert-box">📬 You have <strong>{unread_count} unread alerts</strong> from your agents.</div>',
+            unsafe_allow_html=True)
 
-    with col1:
-        customer_type = st.selectbox("Customer Type", ["Individual", "Retailer"])
+    # Agent status overview
+    st.markdown("### 🤖 Agent Status")
+    cols = st.columns(7)
+    agents = [
+        ("📦", "Stock Monitor"),
+        ("💸", "AR Collection"),
+        ("🏭", "Supplier Perf."),
+        ("📈", "Sales Forecast"),
+        ("👥", "CRM Agent"),
+        ("💰", "Fin. Health"),
+        ("🎯", "Goal Planner"),
+    ]
+    for col, (icon, name) in zip(cols, agents):
+        with col:
+            st.markdown(f"""<div class="agent-card" style="text-align:center; padding:0.8rem;">
+                <div style="font-size:1.5rem">{icon}</div>
+                <div style="font-size:0.7rem; color:#aaa; margin-top:4px">{name}</div>
+                <div style="margin-top:6px"><span class="status-dot dot-green"></span><span style="font-size:0.7rem">Ready</span></div>
+            </div>""", unsafe_allow_html=True)
 
-        if customer_type == "Individual":
-            # Get customers from database
-            customers_df = get_customers()
+    st.markdown("---")
 
-            if not customers_df.empty:
-                customer_options = {f"{row['customer_Name']} ({row['customer_ID']})": row['customer_ID']
-                                    for _, row in customers_df.iterrows()}
-                selected_customer = st.selectbox("Select Customer", list(customer_options.keys()))
-                customer_id = customer_options[selected_customer]
-                customer_name = selected_customer.split(" (")[0]
+    # Run agents
+    tabs = st.tabs(
+        ["📦 Stock", "💸 AR", "🏭 Suppliers", "📈 Forecast", "👥 CRM", "💰 Finance", "🎯 Goal Planner", "📋 Logs & Alerts"])
 
-                # Get customer email
-                customer_email = customers_df[customers_df['customer_ID'] == customer_id]['email'].iloc[
-                    0] if not customers_df.empty else ""
-                recipient_email = st.text_input("Email for Invoice", value=customer_email if customer_email else "")
+    # ── STOCK MONITOR TAB
+    with tabs[0]:
+        st.subheader("📦 Proactive Stock Monitor Agent")
+        st.markdown("*Autonomously checks inventory levels, reasons about urgency, and sends reorder alerts*")
+        if st.button("▶ Run Stock Monitor Agent", type="primary"):
+            with st.spinner("Agent scanning inventory and reasoning..."):
+                result = run_stock_monitor_agent()
+            if result['status'] == 'healthy':
+                st.markdown('<div class="alert-box-green">✅ All stock levels are healthy. No action needed.</div>',
+                            unsafe_allow_html=True)
+            elif result['status'] == 'alerts':
+                st.warning(f"⚠️ {len(result['alerts'])} products need attention")
+                for alert in result['alerts']:
+                    st.markdown(f'<div class="alert-box">{alert}</div>', unsafe_allow_html=True)
+                with st.expander("🧠 AI Reasoning"):
+                    st.write(result.get('reasoning', ''))
+                if not result['low_stock'].empty:
+                    st.dataframe(result['low_stock'])
             else:
-                st.warning("No customers found. Please add customers first.")
-                customer_id = st.text_input("Customer ID", "c011")
-                customer_name = st.text_input("Customer Name")
-                recipient_email = st.text_input("Email for Invoice")
-        else:
-            # Get retailers from database
-            retailers_df = get_retailers()
+                st.error(f"Agent error: {result.get('error')}")
 
-            if not retailers_df.empty:
-                active_retailers = retailers_df[retailers_df['status'] == 'Active']
-                if not active_retailers.empty:
-                    retailer_options = {f"{row['retailer_Name']} ({row['retailer_ID']})": row['retailer_ID']
-                                        for _, row in active_retailers.iterrows()}
-                    selected_retailer = st.selectbox("Select Retailer", list(retailer_options.keys()))
-                    customer_id = retailer_options[selected_retailer]
-                    customer_name = selected_retailer.split(" (")[0]
-
-                    # Get retailer contact
-                    retailer_contact = \
-                    active_retailers[active_retailers['retailer_ID'] == customer_id]['management_Contacts'].iloc[0]
-                    recipient_email = st.text_input("Email for Invoice",
-                                                    value=retailer_contact if "@" in str(retailer_contact) else "")
-                else:
-                    st.warning("No active retailers found.")
-                    customer_id = st.text_input("Customer ID", "r006")
-                    customer_name = st.text_input("Customer Name")
-                    recipient_email = st.text_input("Email for Invoice")
+    # ── AR COLLECTION TAB
+    with tabs[1]:
+        st.subheader("💸 Accounts Receivable Collection Agent")
+        st.markdown("*Autonomously monitors overdue invoices and escalates collection actions*")
+        if st.button("▶ Run AR Collection Agent", type="primary"):
+            with st.spinner("Agent scanning invoices and planning collection actions..."):
+                result = run_ar_collection_agent()
+            if result['status'] == 'healthy':
+                st.markdown('<div class="alert-box-green">✅ No overdue invoices. All accounts current.</div>',
+                            unsafe_allow_html=True)
+            elif result['status'] == 'overdue_found':
+                st.warning(f"⚠️ R{result['total']:,.2f} in overdue invoices")
+                for action in result['actions']:
+                    color = "alert-box-red" if action['days'] >= 30 else "alert-box"
+                    st.markdown(
+                        f'<div class="{color}">👤 <strong>{action["customer"]}</strong> — {action["action"]} ({action["days"]} days, R{action["amount"]:,.2f})</div>',
+                        unsafe_allow_html=True)
+                st.dataframe(result['overdue'])
             else:
-                st.warning("No retailers found.")
-                customer_id = st.text_input("Customer ID", "r006")
-                customer_name = st.text_input("Customer Name")
-                recipient_email = st.text_input("Email for Invoice")
+                st.error(f"Agent error: {result.get('error')}")
 
-    # Order Items
-    st.subheader("Order Items")
+    # ── SUPPLIER PERFORMANCE TAB
+    with tabs[2]:
+        st.subheader("🏭 Supplier Performance Agent")
+        st.markdown("*Evaluates supplier reliability and recommends strategic changes*")
+        if st.button("▶ Run Supplier Performance Agent", type="primary"):
+            with st.spinner("Agent evaluating all suppliers..."):
+                result = run_supplier_performance_agent()
+            if result['status'] == 'complete':
+                st.markdown("#### 🧠 AI Analysis")
+                st.info(result['analysis'])
+                for alert in result.get('alerts', []):
+                    st.markdown(f'<div class="alert-box">{alert}</div>', unsafe_allow_html=True)
+                if not result['suppliers'].empty:
+                    st.dataframe(result['suppliers'])
+            else:
+                st.error(f"Agent error: {result.get('error')}")
 
-    # Get products for dropdown
-    products_df = get_products()
+    # ── SALES FORECASTING TAB
+    with tabs[3]:
+        st.subheader("📈 Sales Trend & Demand Forecasting Agent")
+        st.markdown("*Analyses transaction history and generates demand forecasts*")
+        if st.button("▶ Run Sales Forecasting Agent", type="primary"):
+            with st.spinner("Agent analysing sales trends and generating forecast..."):
+                result = run_sales_forecasting_agent()
+            if result['status'] == 'complete':
+                st.markdown("#### 📊 AI Forecast & Recommendations")
+                st.info(result['forecast'])
+                col1, col2 = st.columns(2)
+                with col1:
+                    if not result['sales'].empty:
+                        st.markdown("**Sales by Category**")
+                        sale_data = result['sales'][result['sales']['category'] == 'Sale']
+                        st.metric("Total Sales", f"R{sale_data['amount'].sum():,.2f}")
+                with col2:
+                    if not result['inventory'].empty:
+                        st.markdown("**Inventory Overview**")
+                        st.metric("Products Tracked", len(result['inventory']))
+            else:
+                st.error(f"Agent error: {result.get('error')}")
 
-    if 'sale_items' not in st.session_state:
-        st.session_state.sale_items = []
+    # ── CRM TAB
+    with tabs[4]:
+        st.subheader("👥 Customer Relationship Agent")
+        st.markdown("*Detects churn risk, identifies VIP customers, generates outreach strategies*")
+        if st.button("▶ Run CRM Agent", type="primary"):
+            with st.spinner("Agent analysing customer relationships..."):
+                result = run_crm_agent()
+            if result['status'] == 'complete':
+                st.markdown("#### 🧠 CRM Strategy")
+                st.info(result['strategy'])
+                if result['actions']:
+                    st.markdown("#### ⚠️ Customers Requiring Attention")
+                    for action in result['actions']:
+                        st.markdown(
+                            f'<div class="alert-box">👤 <strong>{action["customer"]}</strong> — {action["issue"]} ({action["days"]} days since last order)</div>',
+                            unsafe_allow_html=True)
+                st.markdown(f"**🏆 Top Customers:** {result.get('top_customers', 'N/A')}")
+                if not result['customers'].empty:
+                    display_cols = [c for c in ['customer_Name', 'total_orders', 'total_spent', 'outstanding_balance',
+                                                'days_since_order'] if c in result['customers'].columns]
+                    st.dataframe(result['customers'][display_cols])
+            else:
+                st.error(f"Agent error: {result.get('error')}")
 
-    # Add item form
-    with st.form("add_item"):
-        col1, col2, col3, col4 = st.columns(4)
+    # ── FINANCIAL HEALTH TAB
+    with tabs[5]:
+        st.subheader("💰 Financial Health Monitor Agent")
+        st.markdown("*Monitors cash flow ratios, flags risks, and forecasts financial health*")
+        if st.button("▶ Run Financial Health Agent", type="primary"):
+            with st.spinner("Agent analysing financial health..."):
+                result = run_financial_health_agent()
+            if result['status'] == 'complete':
+                metrics = result['metrics']
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("AR Outstanding", f"R{metrics['total_ar']:,.2f}")
+                with col2:
+                    st.metric("AP Outstanding", f"R{metrics['total_ap']:,.2f}")
+                with col3:
+                    delta = metrics['total_ar'] - metrics['total_ap']
+                    st.metric("Net Cash Position", f"R{delta:,.2f}", delta=f"R{delta:,.2f}")
+                with col4:
+                    st.metric("Drawings / Revenue", f"{metrics['drawings_to_revenue_pct']:.1f}%")
+                st.markdown("#### 🧠 Financial Health Analysis")
+                st.info(result['analysis'])
+            else:
+                st.error(f"Agent error: {result.get('error')}")
+
+    # ── GOAL PLANNER TAB
+    with tabs[6]:
+        st.subheader("🎯 Multi-Step Goal Planning Agent")
+        st.markdown("*Give the agent a high-level business goal — it plans and executes the steps*")
+
+        goal_examples = [
+            "Prepare for the school holiday season in December",
+            "Expand our curtains product line",
+            "Reduce our accounts receivable by 50% in 30 days",
+            "Find 2 new supplier alternatives for bedding",
+            "Increase monthly revenue by 20%"
+        ]
+        st.markdown("**Example goals:**")
+        for ex in goal_examples:
+            st.markdown(f"• *{ex}*")
+
+        goal_input = st.text_area("Enter your business goal:",
+                                  placeholder="e.g. Prepare for the school holiday season in December", height=80)
+
+        if st.button("▶ Execute Goal Planning Agent", type="primary") and goal_input:
+            with st.spinner("Agent planning and executing multi-step strategy..."):
+                result = run_goal_planning_agent(goal_input)
+            if result['status'] == 'complete':
+                st.markdown(f"#### 📋 Strategic Plan: *{result['goal']}*")
+                st.info(result['plan'])
+                if result.get('data'):
+                    with st.expander("📊 Data Retrieved by Agent"):
+                        for i, d in enumerate(result['data']):
+                            st.markdown(f"**Query {i + 1} result:**")
+                            st.text(d)
+            else:
+                st.error(f"Agent error: {result.get('error')}")
+
+    # ── LOGS & ALERTS TAB
+    with tabs[7]:
+        st.subheader("📋 Agent Logs & Alerts")
+        col1, col2 = st.columns(2)
 
         with col1:
-            if not products_df.empty:
-                product_options = {f"{row['products_ID']} ({row['product_ID']})": row['product_ID']
-                                   for _, row in products_df.iterrows()}
-                selected_product = st.selectbox("Product", list(product_options.keys()))
-                product_id = product_options[selected_product]
+            st.markdown("#### 🔔 Recent Alerts")
+            if st.button("Mark All as Read"):
+                mark_alerts_read()
+                st.rerun()
+            alerts_df = get_all_alerts()
+            if not alerts_df.empty:
+                for _, row in alerts_df.iterrows():
+                    is_unread = row.get('is_read', 1) == 0
+                    color = "alert-box-red" if row['alert_type'] in ['critical_stock', 'final_notice'] else "alert-box"
+                    badge = " 🆕" if is_unread else ""
+                    st.markdown(
+                        f'<div class="{color}"><small><strong>{row["agent_name"]}</strong>{badge} — {row["timestamp"]}</small><br>{row["message"]}</div>',
+                        unsafe_allow_html=True)
             else:
-                st.warning("No products available. Please add products first.")
-                product_id = ""
+                st.info("No alerts yet. Run an agent to generate alerts.")
 
-        if not products_df.empty and product_id:
-            # Get product details
-            product_row = products_df[products_df['product_ID'] == product_id].iloc[0]
-            product_name = product_row['products_ID']
-            unit_price = float(product_row['selling_Price']) if pd.notna(product_row['selling_Price']) else 0.0
-
-            # Get inventory for stock check
-            inventory_df = get_inventory()
-            stock_available = 0
-            if not inventory_df.empty:
-                inv_row = inventory_df[inventory_df['product_ID'] == product_id]
-                if not inv_row.empty:
-                    stock_available = inv_row['stock_on_hand'].iloc[0]
-
-            with col2:
-                st.write(f"**Unit Price:** R{unit_price:,.2f}")
-                st.write(f"**Stock Available:** {stock_available} units")
-
-            with col3:
-                quantity = st.number_input("Quantity", min_value=1,
-                                           max_value=stock_available if stock_available > 0 else 100, value=1)
-
-            with col4:
-                item_total = quantity * unit_price
-                st.write(f"**Item Total:** R{item_total:,.2f}")
-
-        add_item = st.form_submit_button("Add Item")
-
-        if not products_df.empty and product_id:
-            if add_item and quantity > 0:
-                if quantity <= stock_available:
-                    st.session_state.sale_items.append({
-                        'product_id': product_id,
-                        'item_code': product_id,
-                        'description': product_name,
-                        'quantity': quantity,
-                        'unit_price': unit_price,
-                        'total': item_total
-                    })
-                    st.success(f"Added {quantity}x {product_name}")
-                    st.rerun()
-                else:
-                    st.error(f"Insufficient stock. Only {stock_available} units available.")
-
-    # Display current items
-    if st.session_state.sale_items:
-        st.subheader("Current Order Items")
-        items_df = pd.DataFrame(st.session_state.sale_items)
-        st.dataframe(items_df[['description', 'quantity', 'unit_price', 'total']])
-
-        # Calculate totals
-        subtotal = sum(item['total'] for item in st.session_state.sale_items)
-        vat = subtotal * 0.15
-        total = subtotal + vat
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Subtotal", f"R{subtotal:,.2f}")
         with col2:
-            st.metric("VAT (15%)", f"R{vat:,.2f}")
-        with col3:
-            st.metric("Total", f"R{total:,.2f}")
+            st.markdown("#### 📝 Agent Activity Log")
+            logs_df = get_agent_logs()
+            if not logs_df.empty:
+                for _, row in logs_df.iterrows():
+                    severity_color = {"critical": "alert-box-red", "warning": "alert-box", "info": "alert-box-green",
+                                      "error": "alert-box-red"}.get(row.get('severity', 'info'), "alert-box")
+                    st.markdown(
+                        f'<div class="{severity_color}"><small><strong>{row["agent_name"]}</strong> — {row["timestamp"]}</small><br><em>{row["action_taken"]}</em><br>{str(row["result"])[:200]}</div>',
+                        unsafe_allow_html=True)
+            else:
+                st.info("No agent activity yet.")
 
-        # Clear items button
-        if st.button("Clear All Items"):
-            st.session_state.sale_items = []
-            st.rerun()
+    # ── RUN ALL AGENTS
+    st.markdown("---")
+    st.markdown("### ⚡ Run All Agents")
+    if st.button("▶▶ Run All 6 Monitoring Agents Now", type="primary"):
+        with st.spinner("Running all agents simultaneously..."):
+            results = {}
+            results['stock'] = run_stock_monitor_agent()
+            results['ar'] = run_ar_collection_agent()
+            results['suppliers'] = run_supplier_performance_agent()
+            results['forecast'] = run_sales_forecasting_agent()
+            results['crm'] = run_crm_agent()
+            results['finance'] = run_financial_health_agent()
 
-        # Process Sale button
-        if st.button("✅ Process Sale & Generate Invoice", type="primary"):
-            with st.spinner("Processing sale..."):
-                result = process_sale(
-                    customer_id=customer_id,
-                    customer_name=customer_name,
-                    customer_type=customer_type,
-                    items=st.session_state.sale_items,
-                    recipient_email=recipient_email if recipient_email else None
-                )
+        st.success("✅ All agents completed! Check the Logs & Alerts tab for results.")
+        new_alerts = get_unread_alerts_count()
+        if new_alerts > 0:
+            st.warning(f"📬 {new_alerts} new alerts generated. Review the Logs & Alerts tab.")
+        st.rerun()
 
-                if result['success']:
-                    st.success(result['message'])
 
-                    # Show inventory updates
-                    with st.expander("Inventory Updates"):
-                        for update in result['inventory_updates']:
-                            if update['success']:
-                                st.success(update['message'])
-                            else:
-                                st.error(update['message'])
-
-                    # Show invoice details
-                    with st.expander("Invoice Details"):
-                        invoice = result['invoice_data']
-                        st.write(f"**Invoice Number:** {invoice['invoice_number']}")
-                        st.write(f"**Invoice Date:** {invoice['invoice_date']}")
-                        st.write(f"**Due Date:** {invoice['due_date']}")
-                        st.write(f"**Total Amount:** R{invoice['total']:,.2f}")
-
-                        # Download invoice button
-                        st.download_button(
-                            label="📄 Download Invoice PDF",
-                            data=result['invoice_pdf'],
-                            file_name=f"invoice_{invoice['invoice_number']}.pdf",
-                            mime="application/pdf"
-                        )
-
-                    # Show email status
-                    if result.get('email_status'):
-                        if result['email_status']['success']:
-                            st.success(result['email_status']['message'])
-                        else:
-                            st.warning(result['email_status']['message'])
-
-                    # Clear items after successful sale
-                    if st.button("Start New Sale"):
-                        st.session_state.sale_items = []
-                        st.rerun()
-                else:
-                    st.error(result['message'])
-                    if 'details' in result:
-                        for detail in result['details']:
-                            st.error(detail['message'])
-
-# -----------------------
-# CHAT ASSISTANT PAGE
-# -----------------------
-elif page == "💬 AI Chat Assistant":
-    st.header("🤖 AI Assistant")
-    st.markdown("Ask me anything about your suppliers, products, retailers, customers, inventory, or finances!")
+# ============================================
+# CHAT ASSISTANT
+# ============================================
+elif "AI Chat" in page:
+    st.header("🤖 AI Chat Assistant")
+    st.markdown("Ask anything about your suppliers, products, inventory, finances, or market trends.")
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Display chat history
     for msg in st.session_state.messages:
         st.chat_message(msg["role"]).write(msg["content"])
 
-    # User input
-    user_input = st.chat_input("Ask about your suppliers, products, or orders...")
-
+    user_input = st.chat_input("Ask about your business...")
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
         st.chat_message("user").write(user_input)
-
         try:
             with st.spinner("Thinking..."):
                 response = run_react_agent(user_input)
         except Exception as e:
             response = f"⚠️ Error: {str(e)}"
-
         st.session_state.messages.append({"role": "assistant", "content": response})
         st.chat_message("assistant").write(response)
 
-# -----------------------
-# SUPPLIER DASHBOARD
-# -----------------------
-elif page == "📊 Supplier Dashboard":
+
+# ============================================
+# PROCESS SALE
+# ============================================
+elif "Process Sale" in page:
+    st.header("🛒 Process New Sale")
+    customers_df = get_customers()
+    retailers_df = get_retailers()
+    products_df = get_products()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        customer_type = st.selectbox("Customer Type", ["Individual", "Retailer"])
+        if customer_type == "Individual" and not customers_df.empty:
+            opts = {f"{r['customer_Name']} ({r['customer_ID']})": r['customer_ID'] for _, r in customers_df.iterrows()}
+            sel = st.selectbox("Select Customer", list(opts.keys()))
+            customer_id = opts[sel]
+            customer_name = sel.split(" (")[0]
+            email_val = customers_df[customers_df['customer_ID'] == customer_id]['email'].iloc[0]
+            recipient_email = st.text_input("Email", value=email_val)
+        elif not retailers_df.empty:
+            active = retailers_df[retailers_df['status'] == 'Active']
+            opts = {f"{r['retailer_Name']} ({r['retailer_ID']})": r['retailer_ID'] for _, r in active.iterrows()}
+            sel = st.selectbox("Select Retailer", list(opts.keys()))
+            customer_id = opts[sel]
+            customer_name = sel.split(" (")[0]
+            recipient_email = st.text_input("Email for Invoice")
+        else:
+            customer_id = st.text_input("Customer ID")
+            customer_name = st.text_input("Customer Name")
+            recipient_email = st.text_input("Email")
+
+    if 'sale_items' not in st.session_state:
+        st.session_state.sale_items = []
+
+    st.subheader("Order Items")
+    with st.form("add_item"):
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            if not products_df.empty:
+                prod_opts = {f"{r['products_ID']} ({r['product_ID']})": r['product_ID'] for _, r in
+                             products_df.iterrows()}
+                sel_prod = st.selectbox("Product", list(prod_opts.keys()))
+                product_id = prod_opts[sel_prod]
+            else:
+                product_id = ""
+        if not products_df.empty and product_id:
+            prod_row = products_df[products_df['product_ID'] == product_id].iloc[0]
+            unit_price = float(prod_row['selling_Price']) if pd.notna(prod_row['selling_Price']) else 0.0
+            inv_df = get_inventory()
+            stock_available = 0
+            if not inv_df.empty:
+                inv_row = inv_df[inv_df['product_ID'] == product_id]
+                if not inv_row.empty:
+                    stock_available = inv_row['stock_on_hand'].iloc[0]
+            with c2:
+                st.write(f"**Price:** R{unit_price:,.2f}")
+                st.write(f"**Stock:** {stock_available}")
+            with c3:
+                quantity = st.number_input("Qty", min_value=1, max_value=max(stock_available, 1), value=1)
+            with c4:
+                st.write(f"**Total:** R{quantity * unit_price:,.2f}")
+        add_item = st.form_submit_button("Add Item")
+        if not products_df.empty and product_id and add_item:
+            if quantity <= stock_available:
+                st.session_state.sale_items.append({
+                    'product_id': product_id, 'item_code': product_id,
+                    'description': prod_row['products_ID'], 'quantity': quantity,
+                    'unit_price': unit_price, 'total': quantity * unit_price
+                })
+                st.rerun()
+            else:
+                st.error(f"Only {stock_available} units available.")
+
+    if st.session_state.sale_items:
+        st.dataframe(pd.DataFrame(st.session_state.sale_items)[['description', 'quantity', 'unit_price', 'total']])
+        subtotal = sum(i['total'] for i in st.session_state.sale_items)
+        vat = subtotal * 0.15
+        total = subtotal + vat
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Subtotal", f"R{subtotal:,.2f}")
+        c2.metric("VAT 15%", f"R{vat:,.2f}")
+        c3.metric("Total", f"R{total:,.2f}")
+        if st.button("Clear Items"):
+            st.session_state.sale_items = []
+            st.rerun()
+        if st.button("✅ Process Sale & Generate Invoice", type="primary"):
+            with st.spinner("Processing..."):
+                result = process_sale(customer_id, customer_name, customer_type,
+                                      st.session_state.sale_items, recipient_email)
+            if result['success']:
+                st.success(result['message'])
+                inv = result['invoice_data']
+                st.download_button("📄 Download Invoice PDF", data=result['invoice_pdf'],
+                                   file_name=f"invoice_{inv['invoice_number']}.pdf", mime="application/pdf")
+                st.session_state.sale_items = []
+            else:
+                st.error(result['message'])
+
+
+# ============================================
+# DASHBOARDS (unchanged from original)
+# ============================================
+elif "Supplier Dashboard" in page:
     st.header("🏭 Supplier Management")
+    df = get_suppliers()
+    if not df.empty:
+        st.dataframe(df)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total Suppliers", len(df))
+        c2.metric("Total Products", len(get_products()))
+        perf = get_performance()
+        if not perf.empty:
+            perf['r'] = pd.to_numeric(perf['supplier_Rating'], errors='coerce')
+            c3.metric("Top Rated (4+⭐)", len(perf[perf['r'] >= 4]))
+    else:
+        st.info("No supplier data.")
 
-    try:
-        df_suppliers = get_suppliers()
-
-        if not df_suppliers.empty:
-            st.subheader("📋 All Suppliers")
-            st.dataframe(df_suppliers)
-
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                st.metric("Total Suppliers", len(df_suppliers))
-
-            with col2:
-                products_df = get_products()
-                st.metric("Total Products", len(products_df) if not products_df.empty else 0)
-
-            with col3:
-                perf_df = get_performance()
-                if not perf_df.empty and 'supplier_Rating' in perf_df.columns:
-                    # Convert to numeric safely
-                    perf_df['supplier_Rating_num'] = pd.to_numeric(perf_df['supplier_Rating'], errors='coerce')
-                    top_rated = len(perf_df[perf_df['supplier_Rating_num'] >= 4])
-                    st.metric("Top Rated Suppliers (4+⭐)", top_rated)
-                else:
-                    st.metric("Top Rated Suppliers (4+⭐)", "N/A")
-
-        else:
-            st.info("No supplier data available. Please add suppliers using the 'Add Data' page.")
-
-    except Exception as e:
-        st.error(f"Error loading supplier dashboard: {str(e)}")
-        import traceback
-
-        st.error(traceback.format_exc())
-
-# -----------------------
-# PRODUCT DASHBOARD
-# -----------------------
-elif page == "📦 Product Dashboard":
+elif "Product Dashboard" in page:
     st.header("📦 Product Catalog")
+    df = get_products()
+    if not df.empty:
+        display = df.copy()
+        if 'unit_Cost' in display.columns:
+            display['unit_Cost'] = display['unit_Cost'].apply(lambda x: f"R{x:,.2f}" if pd.notna(x) else x)
+        if 'selling_Price' in display.columns:
+            display['selling_Price'] = display['selling_Price'].apply(lambda x: f"R{x:,.2f}" if pd.notna(x) else x)
+        st.dataframe(display)
+        if 'product_Categories' in df.columns:
+            st.bar_chart(df['product_Categories'].value_counts())
+    else:
+        st.info("No product data.")
 
-    try:
-        df_products = get_products()
-
-        if not df_products.empty and len(df_products) > 0:
-            st.subheader("📋 All Products")
-
-            # Create a copy for display to avoid modifying original
-            display_df = df_products.copy()
-
-            if 'unit_Cost' in display_df.columns:
-                display_df['unit_Cost'] = display_df['unit_Cost'].apply(lambda x: f"R{x:,.2f}" if pd.notna(x) else x)
-            if 'selling_Price' in display_df.columns:
-                display_df['selling_Price'] = display_df['selling_Price'].apply(
-                    lambda x: f"R{x:,.2f}" if pd.notna(x) else x)
-
-            st.dataframe(display_df)
-
-            st.subheader("📊 Products by Category")
-            if 'product_Categories' in df_products.columns:
-                # Check if column has data before counting
-                if not df_products['product_Categories'].isna().all():
-                    category_counts = df_products['product_Categories'].value_counts()
-                    if not category_counts.empty:
-                        st.bar_chart(category_counts)
-                else:
-                    st.info("No category data available")
-
-            st.subheader("💰 Profit Margin by Product")
-            if 'unit_Cost' in df_products.columns and 'selling_Price' in df_products.columns:
-                # Convert to numeric safely
-                df_products['unit_Cost_num'] = pd.to_numeric(df_products['unit_Cost'], errors='coerce')
-                df_products['selling_Price_num'] = pd.to_numeric(df_products['selling_Price'], errors='coerce')
-
-                # Create a copy to avoid SettingWithCopyWarning
-                df_margins = df_products.copy()
-
-                # Calculate profit margin only where we have valid data
-                valid_mask = (df_margins['selling_Price_num'] > 0) & (df_margins['unit_Cost_num'].notna())
-
-                # Initialize column with 0
-                df_margins['profit_margin'] = 0.0
-
-                # Calculate margins only for valid rows
-                if valid_mask.any():  # Check if any valid rows exist
-                    df_margins.loc[valid_mask, 'profit_margin'] = (
-                            (df_margins.loc[valid_mask, 'selling_Price_num'] - df_margins.loc[
-                                valid_mask, 'unit_Cost_num']) /
-                            df_margins.loc[valid_mask, 'selling_Price_num'] * 100
-                    ).round(2)
-
-                # Only show chart if we have valid data
-                if (df_margins['profit_margin'] != 0).any():
-                    margin_df = df_margins[['products_ID', 'profit_margin']].set_index('products_ID')
-                    if not margin_df.empty:
-                        st.bar_chart(margin_df)
-                else:
-                    st.info("No valid profit margin data available")
-
-            st.subheader("⏱️ Lead Times by Product")
-            if 'lead_Times' in df_products.columns and 'products_ID' in df_products.columns:
-                # Drop duplicates and handle NaN values
-                lead_times_df = df_products[['products_ID', 'lead_Times']].drop_duplicates()
-                lead_times_df = lead_times_df.dropna(subset=['lead_Times'])
-                if not lead_times_df.empty:
-                    st.dataframe(lead_times_df)
-                else:
-                    st.info("No lead time data available")
-
-        else:
-            st.info("No product data available. Please add products using the 'Add Data' page.")
-
-    except Exception as e:
-        st.error(f"Error loading product dashboard: {str(e)}")
-        import traceback
-
-        st.error(traceback.format_exc())
-
-# -----------------------
-# RETAILER DASHBOARD
-# -----------------------
-elif page == "🏪 Retailer Dashboard":
+elif "Retailer Dashboard" in page:
     st.header("🏪 Retailer Management")
+    df = get_retailers()
+    if not df.empty:
+        st.dataframe(df)
+        if 'order_Status' in df.columns:
+            st.bar_chart(df['order_Status'].value_counts())
+    else:
+        st.info("No retailer data.")
 
-    try:
-        df_retailers = get_retailers()
+elif "Customer Dashboard" in page:
+    st.header("👥 Customer Management")
+    df = get_customers()
+    if not df.empty:
+        st.dataframe(df)
+        df['ts'] = pd.to_numeric(df['total_spent'], errors='coerce')
+        df['ob'] = pd.to_numeric(df['outstanding_balance'], errors='coerce')
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total Customers", len(df))
+        c2.metric("Total Revenue", f"R{df['ts'].sum():,.2f}")
+        c3.metric("Outstanding", f"R{df['ob'].sum():,.2f}")
+    else:
+        st.info("No customer data.")
 
-        if not df_retailers.empty:
-            st.subheader("📋 All Retailers")
-            st.dataframe(df_retailers)
-
-            st.subheader("📊 Order Status Distribution")
-            if 'order_Status' in df_retailers.columns:
-                status_counts = df_retailers['order_Status'].value_counts()
-                if not status_counts.empty:
-                    st.bar_chart(status_counts)
-
-            st.subheader("🏷️ Retailer Status")
-            if 'status' in df_retailers.columns:
-                retailer_status = df_retailers['status'].value_counts()
-                if not retailer_status.empty:
-                    st.bar_chart(retailer_status)
-
-        else:
-            st.info("No retailer data available. Please add retailers using the 'Add Data' page.")
-
-    except Exception as e:
-        st.error(f"Error loading retailer dashboard: {str(e)}")
-        import traceback
-
-        st.error(traceback.format_exc())
-
-# -----------------------
-# CUSTOMER DASHBOARD
-# -----------------------
-elif page == "👥 Customer Dashboard":
-    st.header("👥 Independent Customer Management")
-
-    try:
-        df_customers = get_customers()
-
-        if not df_customers.empty:
-            st.subheader("📋 All Customers")
-
-            display_df = df_customers.copy()
-            if 'total_spent' in display_df.columns:
-                display_df['total_spent'] = display_df['total_spent'].apply(
-                    lambda x: f"R{x:,.2f}" if pd.notna(x) else x)
-            if 'outstanding_balance' in display_df.columns:
-                display_df['outstanding_balance'] = display_df['outstanding_balance'].apply(
-                    lambda x: f"R{x:,.2f}" if pd.notna(x) else x)
-            st.dataframe(display_df)
-
-            # Create numeric versions for calculations
-            df_customers['total_spent_num'] = pd.to_numeric(df_customers['total_spent'], errors='coerce')
-            df_customers['outstanding_balance_num'] = pd.to_numeric(df_customers['outstanding_balance'],
-                                                                    errors='coerce')
-
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                st.metric("Total Customers", len(df_customers))
-
-            with col2:
-                total_spent = df_customers['total_spent_num'].sum()
-                st.metric("Total Sales to Customers", f"R{total_spent:,.2f}" if pd.notna(total_spent) else "R0.00")
-
-            with col3:
-                outstanding = df_customers['outstanding_balance_num'].sum()
-                st.metric("Outstanding Balances", f"R{outstanding:,.2f}" if pd.notna(outstanding) else "R0.00")
-
-            st.subheader("⚠️ Customers with Outstanding Balances")
-            outstanding_customers = df_customers[df_customers['outstanding_balance_num'] > 0]
-            if not outstanding_customers.empty:
-                st.dataframe(outstanding_customers[['customer_Name', 'outstanding_balance']])
-            else:
-                st.success("All customers have paid their balances!")
-
-            st.subheader("🏆 Top Customers by Spending")
-            top_customers = df_customers.nlargest(5, 'total_spent_num')[['customer_Name', 'total_spent']]
-            if not top_customers.empty:
-                st.dataframe(top_customers)
-            else:
-                st.info("No customer spending data available")
-
-        else:
-            st.info("No customer data available. Please add customers using the 'Add Data' page.")
-
-    except Exception as e:
-        st.error(f"Error loading customer dashboard: {str(e)}")
-        import traceback
-
-        st.error(traceback.format_exc())
-
-# -----------------------
-# INVENTORY DASHBOARD
-# -----------------------
-elif page == "📦 Inventory Dashboard":
+elif "Inventory Dashboard" in page:
     st.header("📦 Inventory Management")
+    df = get_inventory()
+    if not df.empty:
+        low = df[df['stock_on_hand'] <= df['reorder_level']]
+        if not low.empty:
+            st.warning(f"⚠️ {len(low)} products below reorder level")
+        st.dataframe(df)
+        st.bar_chart(df.set_index('product_Name')['stock_on_hand'])
+    else:
+        st.info("No inventory data.")
 
-    try:
-        # Show low stock alerts at the top
-        low_stock_df = check_low_stock()
-        if not low_stock_df.empty:
-            st.warning(f"⚠️ {len(low_stock_df)} products are below reorder level!")
-
-            # Reorder recommendations
-            st.subheader("🔄 Reorder Recommendations")
-            reorder_df = get_reorder_recommendations()
-            if not reorder_df.empty:
-                for _, row in reorder_df.iterrows():
-                    supplier_info = f" from {row['supplier_Name']}" if 'supplier_Name' in row and pd.notna(
-                        row['supplier_Name']) else ""
-                    st.info(
-                        f"**{row['product_Name']}**: {row['stock_on_hand']} units left (Reorder level: {row['reorder_level']}). "
-                        f"Recommended reorder: {row['reorder_quantity']} units{supplier_info}")
-
-        df_inventory = get_inventory()
-
-        if not df_inventory.empty:
-            st.subheader("📋 Current Inventory Levels")
-
-            display_df = df_inventory.copy()
-            if 'unit_Cost' in display_df.columns:
-                display_df['unit_Cost'] = display_df['unit_Cost'].apply(lambda x: f"R{x:,.2f}" if pd.notna(x) else x)
-            if 'selling_Price' in display_df.columns:
-                display_df['selling_Price'] = display_df['selling_Price'].apply(
-                    lambda x: f"R{x:,.2f}" if pd.notna(x) else x)
-            st.dataframe(display_df)
-
-            st.subheader("📊 Stock Levels by Product")
-            if 'product_Name' in df_inventory.columns and 'stock_on_hand' in df_inventory.columns:
-                # Create a copy to avoid issues
-                stock_df = df_inventory.copy()
-                stock_df = stock_df.set_index('product_Name')['stock_on_hand'].dropna()
-                if not stock_df.empty:
-                    st.bar_chart(stock_df)
-                else:
-                    st.info("No stock data available")
-
-            # Inventory value
-            st.subheader("💰 Inventory Value")
-            if 'unit_Cost' in df_inventory.columns and 'stock_on_hand' in df_inventory.columns:
-                df_inventory['unit_Cost_num'] = pd.to_numeric(df_inventory['unit_Cost'], errors='coerce')
-                df_inventory['stock_on_hand_num'] = pd.to_numeric(df_inventory['stock_on_hand'], errors='coerce')
-
-                # Use .sum() which handles NaN correctly
-                total_value = (df_inventory['stock_on_hand_num'] * df_inventory['unit_Cost_num']).sum()
-                st.metric("Total Inventory Value", f"R{total_value:,.2f}" if pd.notna(total_value) else "R0.00")
-
-        else:
-            st.info("No inventory data available. Please add products to inventory.")
-
-    except Exception as e:
-        st.error(f"Error loading inventory dashboard: {str(e)}")
-        import traceback
-
-        st.error(traceback.format_exc())
-
-# -----------------------
-# FINANCIAL DASHBOARD
-# -----------------------
-elif page == "💰 Financial Dashboard":
+elif "Financial Dashboard" in page:
     st.header("💰 Financial Management")
+    fin = get_financial_summary()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Sales", f"R{fin['total_sales']:,.2f}")
+    c2.metric("AR Outstanding", f"R{fin['total_ar']:,.2f}")
+    c3.metric("AP Outstanding", f"R{fin['total_ap']:,.2f}")
+    c4.metric("Owner Drawings", f"R{fin['total_drawings']:,.2f}")
+    conn = sqlite3.connect("global.db")
+    ar = pd.read_sql_query(
+        "SELECT receivable_ID,customer_Name,due_Date,invoice_Amount,outstanding_Balance,status FROM accounts_receivable WHERE status != 'Paid' ORDER BY due_Date",
+        conn)
+    if not ar.empty:
+        st.subheader("Accounts Receivable")
+        st.dataframe(ar)
+    conn.close()
 
-    try:
-        finances = get_financial_summary()
-
-        st.subheader("📊 Key Financial Metrics")
-        col1, col2, col3, col4 = st.columns(4)
-
-        with col1:
-            total_sales = finances['total_sales'] if finances['total_sales'] is not None else 0
-            st.metric("Total Sales (March)", f"R{total_sales:,.2f}")
-
-        with col2:
-            total_ar = finances['total_ar'] if finances['total_ar'] is not None else 0
-            st.metric("Accounts Receivable", f"R{total_ar:,.2f}")
-
-        with col3:
-            total_ap = finances['total_ap'] if finances['total_ap'] is not None else 0
-            st.metric("Accounts Payable", f"R{total_ap:,.2f}")
-
-        with col4:
-            total_drawings = finances['total_drawings'] if finances['total_drawings'] is not None else 0
-            st.metric("Owner Drawings (March)", f"R{total_drawings:,.2f}")
-
-        st.subheader("📋 Accounts Receivable Details")
-        conn = sqlite3.connect("global.db")
-        ar_details = pd.read_sql_query("""
-                                       SELECT receivable_ID,
-                                              customer_Name,
-                                              invoice_Date,
-                                              due_Date,
-                                              invoice_Amount,
-                                              outstanding_Balance,
-                                              status
-                                       FROM accounts_receivable
-                                       WHERE status != 'Paid'
-                                       ORDER BY due_Date ASC
-                                       """, conn)
-        if not ar_details.empty:
-            ar_details['invoice_Amount'] = ar_details['invoice_Amount'].apply(
-                lambda x: f"R{x:,.2f}" if pd.notna(x) else "R0.00")
-            ar_details['outstanding_Balance'] = ar_details['outstanding_Balance'].apply(
-                lambda x: f"R{x:,.2f}" if pd.notna(x) else "R0.00")
-            st.dataframe(ar_details)
-        else:
-            st.success("No outstanding accounts receivable!")
-        conn.close()
-
-        st.subheader("📋 Accounts Payable Details")
-        conn = sqlite3.connect("global.db")
-        ap_details = pd.read_sql_query("""
-                                       SELECT payable_ID,
-                                              supplier_Name,
-                                              invoice_Date,
-                                              due_Date,
-                                              invoice_Amount,
-                                              outstanding_Balance,
-                                              status
-                                       FROM accounts_payable
-                                       WHERE status != 'Paid'
-                                       ORDER BY due_Date ASC
-                                       """, conn)
-        if not ap_details.empty:
-            ap_details['invoice_Amount'] = ap_details['invoice_Amount'].apply(
-                lambda x: f"R{x:,.2f}" if pd.notna(x) else "R0.00")
-            ap_details['outstanding_Balance'] = ap_details['outstanding_Balance'].apply(
-                lambda x: f"R{x:,.2f}" if pd.notna(x) else "R0.00")
-            st.dataframe(ap_details)
-        else:
-            st.success("No outstanding accounts payable!")
-        conn.close()
-
-        st.subheader("🔄 Recent Transactions")
-        conn = sqlite3.connect("global.db")
-        transactions = pd.read_sql_query("""
-                                         SELECT transaction_ID, date, description, account_Debit, account_Credit, amount, category
-                                         FROM transactions
-                                         ORDER BY date DESC
-                                             LIMIT 15
-                                         """, conn)
-        if not transactions.empty:
-            transactions['amount'] = transactions['amount'].apply(lambda x: f"R{x:,.2f}" if pd.notna(x) else "R0.00")
-            st.dataframe(transactions)
-        else:
-            st.info("No transaction data available")
-        conn.close()
-
-    except Exception as e:
-        st.error(f"Error loading financial dashboard: {str(e)}")
-        import traceback
-
-        st.error(traceback.format_exc())
-
-# -----------------------
-# PERFORMANCE DASHBOARD
-# -----------------------
-elif page == "⭐ Performance Dashboard":
+elif "Performance Dashboard" in page:
     st.header("⭐ Supplier Performance")
+    df = get_performance()
+    if not df.empty:
+        st.dataframe(df)
+        if 'supplier_Rating' in df.columns:
+            df['r'] = pd.to_numeric(df['supplier_Rating'], errors='coerce')
+            st.bar_chart(df.set_index('supplier_Name')['r'])
+    else:
+        st.info("No performance data.")
 
-    try:
-        df_performance = get_performance()
-
-        if not df_performance.empty:
-            st.subheader("📊 Supplier Ratings")
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.dataframe(df_performance)
-
-            with col2:
-                if 'supplier_Rating' in df_performance.columns:
-                    # Convert to numeric safely
-                    df_performance['supplier_Rating_num'] = pd.to_numeric(df_performance['supplier_Rating'],
-                                                                          errors='coerce')
-                    rating_counts = df_performance['supplier_Rating_num'].value_counts().sort_index()
-                    if not rating_counts.empty:
-                        st.subheader("Rating Distribution")
-                        st.bar_chart(rating_counts)
-                    else:
-                        st.info("No rating data available")
-
-            if 'Priority' in df_performance.columns:
-                st.subheader("🎯 Supplier Priority")
-                priority_counts = df_performance['Priority'].value_counts()
-                if not priority_counts.empty:
-                    st.bar_chart(priority_counts)
-                else:
-                    st.info("No priority data available")
-
-            if 'supplier_Rating' in df_performance.columns and 'Notes' in df_performance.columns:
-                st.subheader("📝 Notes from Top Suppliers")
-                df_performance['supplier_Rating_num'] = pd.to_numeric(df_performance['supplier_Rating'],
-                                                                      errors='coerce')
-                top_suppliers = df_performance[df_performance['supplier_Rating_num'] >= 4]
-                if not top_suppliers.empty:
-                    for _, row in top_suppliers.iterrows():
-                        st.info(
-                            f"**{row['supplier_Name']}** (Rating: {row['supplier_Rating']}⭐ - {row['Priority']})\n\n{row['Notes']}")
-                else:
-                    st.info("No top-rated suppliers found")
-
-        else:
-            st.info("No performance data available.")
-
-    except Exception as e:
-        st.error(f"Error loading performance dashboard: {str(e)}")
-        import traceback
-
-        st.error(traceback.format_exc())
-
-# -----------------------
-# ADD DATA PAGE
-# -----------------------
-elif page == "➕ Add Data":
+elif "Add Data" in page:
     st.header("➕ Add New Data")
-
     tab1, tab2, tab3, tab4 = st.tabs(["Add Supplier", "Add Product", "Add Retailer", "Add Customer"])
 
-    # Tab 1: Add Supplier
     with tab1:
-        st.subheader("Add New Supplier")
         with st.form("add_supplier"):
-            supplier_id = st.text_input("Supplier ID (e.g., s006)")
-            supplier_name = st.text_input("Supplier Name")
-            account = st.text_input("Primary Contact Person")
-            wechat = st.text_input("WeChat Contact")
-            website = st.text_input("Website")
-            products_supplied = st.text_input("Products Supplied")
-
-            submitted_supplier = st.form_submit_button("Add Supplier")
-
-            if submitted_supplier:
+            s_id = st.text_input("Supplier ID (e.g., s006)")
+            s_name = st.text_input("Supplier Name")
+            s_account = st.text_input("Primary Contact")
+            s_wechat = st.text_input("WeChat")
+            s_website = st.text_input("Website")
+            s_products = st.text_input("Products")
+            if st.form_submit_button("Add Supplier"):
                 try:
                     conn = sqlite3.connect("global.db")
-                    cur = conn.cursor()
-
-                    cur.execute("""
-                                INSERT INTO suppliers (supplier_ID, supplier_Name, Account, wechat_Contact, Website,
-                                                       products)
-                                VALUES (?, ?, ?, ?, ?, ?)
-                                """, (supplier_id, supplier_name, account, wechat, website, products_supplied))
-
-                    # Check if performance_notes table exists before inserting
-                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='performance_notes'")
-                    if cur.fetchone():
-                        cur.execute("""
-                                    INSERT INTO performance_notes (supplier_ID, supplier_Rating, Priority, Notes)
-                                    VALUES (?, ?, ?, ?)
-                                    """, (supplier_id, 3, 'Alternative', 'New supplier - awaiting evaluation'))
-
-                    conn.commit()
+                    conn.execute("INSERT INTO suppliers VALUES (?,?,?,?,?,?)",
+                                 (s_id, s_name, s_account, s_wechat, s_website, s_products))
+                    conn.execute("INSERT INTO performance_notes VALUES (?,?,?,?)",
+                                 (s_id, 3, 'Alternative', 'New supplier'))
+                    conn.commit();
                     conn.close()
-
-                    # Clear cache to refresh data
                     st.cache_data.clear()
-
-                    st.success(f"✅ Supplier {supplier_name} added successfully!")
-
+                    st.success(f"✅ {s_name} added!")
                 except Exception as e:
-                    st.error(f"❌ Error adding supplier: {str(e)}")
+                    st.error(str(e))
 
-    # Tab 2: Add Product
     with tab2:
-        st.subheader("Add New Product")
         with st.form("add_product"):
-            product_id = st.text_input("Product ID (e.g., p011)")
-            product_categories = st.text_input("Product Category (e.g., Bedding, Curtains, Pots)")
-            products_id = st.text_input("Product Name")
-            supplier_id = st.text_input("Supplier ID (e.g., s001)")
-            supplier_type = st.selectbox("Supplier Type", ["Manufacturer", "Distributor", "Importer", "Wholesaler"])
-            moq = st.text_input("Minimum Order Quantity")
-            lead_times = st.text_input("Lead Times")
-            unit_cost = st.number_input("Unit Cost (R)", min_value=0.0, format="%.2f")
-            selling_price = st.number_input("Selling Price (R)", min_value=0.0, format="%.2f")
-
-            submitted_product = st.form_submit_button("Add Product")
-
-            if submitted_product:
+            p_id = st.text_input("Product ID")
+            p_cat = st.text_input("Category")
+            p_name = st.text_input("Product Name")
+            p_sup = st.text_input("Supplier ID")
+            p_type = st.selectbox("Type", ["Manufacturer", "Distributor", "Importer", "Wholesaler"])
+            p_moq = st.text_input("MOQ")
+            p_lead = st.text_input("Lead Time")
+            p_cost = st.number_input("Unit Cost (R)", min_value=0.0, format="%.2f")
+            p_price = st.number_input("Selling Price (R)", min_value=0.0, format="%.2f")
+            if st.form_submit_button("Add Product"):
                 try:
                     conn = sqlite3.connect("global.db")
-                    cur = conn.cursor()
-
-                    cur.execute("""
-                                INSERT INTO product (product_ID, product_Categories, products_ID, supplier_ID,
-                                                     supplier_Type, MOQ, lead_Times, unit_Cost, selling_Price)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (product_id, product_categories, products_id, supplier_id, supplier_type, moq,
-                                      lead_times, unit_cost, selling_price))
-
-                    # Also add to inventory
-                    cur.execute("""
-                                INSERT INTO inventory (inventory_ID, product_ID, product_Name, stock_on_hand,
-                                                       reorder_level, reorder_quantity, location, last_updated)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (f"inv{product_id}", product_id, products_id, 0, 10, 20, 'Warehouse A',
-                                      datetime.now().strftime("%Y-%m-%d")))
-
-                    conn.commit()
+                    conn.execute("INSERT INTO product VALUES (?,?,?,?,?,?,?,?,?)",
+                                 (p_id, p_cat, p_name, p_sup, p_type, p_moq, p_lead, p_cost, p_price))
+                    conn.execute("INSERT INTO inventory VALUES (?,?,?,?,?,?,?,?)",
+                                 (f"inv{p_id}", p_id, p_name, 0, 10, 20, 'Warehouse A',
+                                  datetime.now().strftime("%Y-%m-%d")))
+                    conn.commit();
                     conn.close()
-
-                    # Clear cache to refresh data
                     st.cache_data.clear()
-
-                    st.success(f"✅ Product {products_id} added successfully!")
-
+                    st.success(f"✅ {p_name} added!")
                 except Exception as e:
-                    st.error(f"❌ Error adding product: {str(e)}")
+                    st.error(str(e))
 
-    # Tab 3: Add Retailer
     with tab3:
-        st.subheader("Add New Retailer")
         with st.form("add_retailer"):
-            retailer_id = st.text_input("Retailer ID (e.g., r006)")
-            retailer_name = st.text_input("Retailer Name")
-            status = st.selectbox("Status", ["Active", "Potential", "On Hold", "Blacklist"])
-            order_quantity = st.text_input("Order Quantity")
-            product = st.text_input("Product")
-            order_status = st.selectbox("Order Status", ["Processing", "Shipped", "Pending Approval", "Delivered"])
-            management_contacts = st.text_input("Management Contact")
-            payment_terms = st.selectbox("Payment Terms",
-                                         ["Net 30", "Net 45", "100% Prepayment", "30 Days Deferred", "To be confirmed"])
-
-            submitted_retailer = st.form_submit_button("Add Retailer")
-
-            if submitted_retailer:
+            r_id = st.text_input("Retailer ID")
+            r_name = st.text_input("Name")
+            r_status = st.selectbox("Status", ["Active", "Potential", "On Hold"])
+            r_qty = st.text_input("Order Quantity")
+            r_prod = st.text_input("Product")
+            r_ostatus = st.selectbox("Order Status", ["Processing", "Shipped", "Pending", "Delivered"])
+            r_contact = st.text_input("Contact")
+            r_terms = st.selectbox("Terms", ["Net 30", "Net 45", "100% Prepayment", "To be confirmed"])
+            if st.form_submit_button("Add Retailer"):
                 try:
                     conn = sqlite3.connect("global.db")
-                    cur = conn.cursor()
-
-                    cur.execute("""
-                                INSERT INTO retailers (retailer_ID, retailer_Name, status, order_Quantity, product,
-                                                       order_Status, management_Contacts, payment_Terms)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (retailer_id, retailer_name, status, order_quantity, product, order_status,
-                                      management_contacts, payment_terms))
-
-                    conn.commit()
+                    conn.execute("INSERT INTO retailers VALUES (?,?,?,?,?,?,?,?)",
+                                 (r_id, r_name, r_status, r_qty, r_prod, r_ostatus, r_contact, r_terms))
+                    conn.commit();
                     conn.close()
-
-                    # Clear cache to refresh data
                     st.cache_data.clear()
-
-                    st.success(f"✅ Retailer {retailer_name} added successfully!")
-
+                    st.success(f"✅ {r_name} added!")
                 except Exception as e:
-                    st.error(f"❌ Error adding retailer: {str(e)}")
+                    st.error(str(e))
 
-    # Tab 4: Add Customer
     with tab4:
-        st.subheader("Add New Independent Customer")
         with st.form("add_customer"):
-            customer_id = st.text_input("Customer ID (e.g., c011)")
-            customer_name = st.text_input("Customer Name")
-            contact_number = st.text_input("Contact Number")
-            email = st.text_input("Email")
-
-            submitted_customer = st.form_submit_button("Add Customer")
-
-            if submitted_customer:
+            c_id = st.text_input("Customer ID")
+            c_name = st.text_input("Name")
+            c_phone = st.text_input("Contact Number")
+            c_email = st.text_input("Email")
+            if st.form_submit_button("Add Customer"):
                 try:
                     conn = sqlite3.connect("global.db")
-                    cur = conn.cursor()
-
-                    cur.execute("""
-                                INSERT INTO customers (customer_ID, customer_Name, contact_Number, email,
-                                                       total_orders, total_spent, outstanding_balance)
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
-                                """, (customer_id, customer_name, contact_number, email, 0, 0.00, 0.00))
-
-                    conn.commit()
+                    conn.execute("INSERT INTO customers VALUES (?,?,?,?,?,?,?,?)",
+                                 (c_id, c_name, c_phone, c_email, 0, 0.00, 0.00, None))
+                    conn.commit();
                     conn.close()
-
-                    # Clear cache to refresh data
                     st.cache_data.clear()
-
-                    st.success(f"✅ Customer {customer_name} added successfully!")
-
+                    st.success(f"✅ {c_name} added!")
                 except Exception as e:
-                    st.error(f"❌ Error adding customer: {str(e)}")
+                    st.error(str(e))
