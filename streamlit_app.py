@@ -115,17 +115,29 @@ st.markdown("""
 # ============================================
 # DATABASE INITIALIZATION
 # ============================================
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'global.db')
+# Use /tmp so the DB is always writable on Streamlit Cloud (and locally)
+DB_PATH = os.path.join('/tmp', 'global.db')
 
 
 def init_database():
+    # Check if ALL required tables exist — if any are missing, rebuild from scratch
+    required_tables = {'suppliers', 'product', 'retailers', 'customers', 'inventory',
+                       'chart_of_accounts', 'accounts_receivable', 'accounts_payable',
+                       'drawings', 'transactions', 'performance_notes',
+                       'agent_logs', 'agent_alerts'}
     if os.path.exists(DB_PATH):
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='suppliers'")
-        if cursor.fetchone():
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            existing = {row[0] for row in cursor.fetchall()}
             conn.close()
-            return
+            if required_tables.issubset(existing):
+                return  # All tables present, nothing to do
+            # Some tables missing — delete and recreate
+            os.remove(DB_PATH)
+        except Exception:
+            pass
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -627,56 +639,12 @@ def init_database():
     conn.close()
 
 
-if not os.path.exists(DB_PATH):
+# Always run init — it checks all tables and only rebuilds if needed
+try:
     init_database()
-else:
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='suppliers'")
-        if not cursor.fetchone():
-            conn.close()
-            os.remove(DB_PATH)
-            init_database()
-        else:
-            # Ensure agent tables exist
-            cursor.execute('''CREATE TABLE IF NOT EXISTS agent_logs
-            (
-                log_ID
-                INTEGER
-                PRIMARY
-                KEY
-                AUTOINCREMENT,
-                agent_name
-                VARCHAR
-                              (
-                50
-                              ),
-                action_taken TEXT, result TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, severity VARCHAR
-                              (
-                                  20
-                              ))''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS agent_alerts
-            (
-                alert_ID
-                INTEGER
-                PRIMARY
-                KEY
-                AUTOINCREMENT,
-                agent_name
-                VARCHAR
-                              (
-                50
-                              ),
-                alert_type VARCHAR
-                              (
-                                  50
-                              ), message TEXT, is_read INTEGER DEFAULT 0,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
-            conn.commit()
-            conn.close()
-    except Exception as e:
-        st.error(f"Database error: {e}")
+except Exception as e:
+    st.error(f"Database initialisation error: {e}")
+    st.stop()
 
 # ============================================
 # API KEY CHECK
@@ -1396,7 +1364,7 @@ def run_web_search(query):
         return f"Search error: {str(e)}"
 
 
-def run_react_agent(user_question, max_iterations=6):
+def run_react_agent(user_question, max_iterations=10):
     system_prompt = """You are a helpful AI assistant for Global Trends, a trading company.
 You have access to two tools:
 1. Database_Query - Query the SQLite database with SELECT statements.
@@ -1404,15 +1372,21 @@ You have access to two tools:
    accounts_receivable, accounts_payable, drawings, transactions, performance_notes
 2. Web_Search - Search the internet for market info.
 
-Format EXACTLY:
-Thought: <reasoning>
-Action: <Database_Query or Web_Search>
-Action Input: <sql or search query>
-Observation: <filled in for you>
+Format EXACTLY like this (one action per turn):
+Thought: <your reasoning>
+Action: Database_Query
+Action Input: SELECT ...
 
-When done:
+OR:
+Thought: <your reasoning>
+Action: Web_Search
+Action Input: <search terms>
+
+When you have enough info:
 Thought: I now know the final answer
-Final Answer: <answer>"""
+Final Answer: <your complete answer>
+
+IMPORTANT: Always use Final Answer when you have the data you need."""
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -1431,14 +1405,22 @@ Final Answer: <answer>"""
             return text.split("Final Answer:")[-1].strip()
 
         action, action_input = None, None
-        for line in text.split("\n"):
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
             if line.startswith("Action:"):
                 action = line.replace("Action:", "").strip()
             if line.startswith("Action Input:"):
+                # Capture multi-line action inputs (e.g. multi-line SQL)
                 action_input = line.replace("Action Input:", "").strip()
+                # Grab any continuation lines
+                for j in range(i + 1, len(lines)):
+                    if lines[j].startswith("Action") or lines[j].startswith("Thought") or lines[j].startswith("Final"):
+                        break
+                    action_input += " " + lines[j].strip()
+                action_input = action_input.strip()
 
         if not action or not action_input:
-            messages.append({"role": "user", "content": "Please continue with Action and Action Input."})
+            messages.append({"role": "user", "content": "Please respond with Thought, Action, and Action Input."})
             continue
 
         if any(k in action.lower() for k in ["database", "db", "query"]):
@@ -1446,11 +1428,20 @@ Final Answer: <answer>"""
         elif any(k in action.lower() for k in ["search", "web"]):
             observation = run_web_search(action_input)
         else:
-            observation = f"Unknown tool '{action}'."
+            observation = f"Unknown tool '{action}'. Use Database_Query or Web_Search."
 
         messages.append({"role": "user", "content": f"Observation: {observation}\nThought:"})
 
-    return "Unable to find a complete answer. Please rephrase your question."
+    # If we ran out of iterations, ask the model to summarise what it found
+    messages.append({"role": "user", "content": "Please give a Final Answer based on what you've found so far."})
+    response = groq_client.chat.completions.create(
+        model="llama-3.3-70b-versatile", messages=messages,
+        temperature=0.2, max_tokens=500
+    )
+    final = response.choices[0].message.content.strip()
+    if "Final Answer:" in final:
+        return final.split("Final Answer:")[-1].strip()
+    return final
 
 
 # ============================================
