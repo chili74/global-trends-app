@@ -112,20 +112,22 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
 # ============================================
 # DATABASE INITIALIZATION
 # ============================================
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'global.db')
+
+
 def init_database():
-    if os.path.exists('global.db'):
-        conn = sqlite3.connect('global.db')
+    if os.path.exists(DB_PATH):
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='suppliers'")
         if cursor.fetchone():
             conn.close()
             return
 
-    conn = sqlite3.connect('global.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
     cursor.execute('''CREATE TABLE IF NOT EXISTS suppliers
@@ -625,16 +627,16 @@ def init_database():
     conn.close()
 
 
-if not os.path.exists('global.db'):
+if not os.path.exists(DB_PATH):
     init_database()
 else:
     try:
-        conn = sqlite3.connect('global.db')
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='suppliers'")
         if not cursor.fetchone():
             conn.close()
-            os.remove('global.db')
+            os.remove(DB_PATH)
             init_database()
         else:
             # Ensure agent tables exist
@@ -748,7 +750,7 @@ def send_whatsapp_notification(message, phone=None):
 
 def log_agent_action(agent_name, action, result, severity="info"):
     try:
-        conn = sqlite3.connect("global.db")
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("INSERT INTO agent_logs (agent_name, action_taken, result, severity) VALUES (?,?,?,?)",
                        (agent_name, action, result, severity))
@@ -760,7 +762,7 @@ def log_agent_action(agent_name, action, result, severity="info"):
 
 def create_alert(agent_name, alert_type, message):
     try:
-        conn = sqlite3.connect("global.db")
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("INSERT INTO agent_alerts (agent_name, alert_type, message) VALUES (?,?,?)",
                        (agent_name, alert_type, message))
@@ -785,7 +787,7 @@ def notify_all(subject, message, severity="info"):
 # ============================================
 @st.cache_data(ttl=60, show_spinner=False)
 def get_suppliers():
-    conn = sqlite3.connect("global.db")
+    conn = sqlite3.connect(DB_PATH)
     try:
         return pd.read_sql_query("SELECT * FROM suppliers", conn)
     finally:
@@ -794,7 +796,7 @@ def get_suppliers():
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_products():
-    conn = sqlite3.connect("global.db")
+    conn = sqlite3.connect(DB_PATH)
     try:
         return pd.read_sql_query(
             "SELECT p.*, s.supplier_Name FROM product p LEFT JOIN suppliers s ON p.supplier_ID = s.supplier_ID", conn)
@@ -804,7 +806,7 @@ def get_products():
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_retailers():
-    conn = sqlite3.connect("global.db")
+    conn = sqlite3.connect(DB_PATH)
     try:
         return pd.read_sql_query("SELECT * FROM retailers", conn)
     finally:
@@ -813,7 +815,7 @@ def get_retailers():
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_customers():
-    conn = sqlite3.connect("global.db")
+    conn = sqlite3.connect(DB_PATH)
     try:
         return pd.read_sql_query("SELECT * FROM customers", conn)
     finally:
@@ -822,7 +824,7 @@ def get_customers():
 
 @st.cache_data(ttl=30, show_spinner=False)
 def get_inventory():
-    conn = sqlite3.connect("global.db")
+    conn = sqlite3.connect(DB_PATH)
     try:
         return pd.read_sql_query("""SELECT i.*, p.selling_Price, p.unit_Cost
                                     FROM inventory i
@@ -834,7 +836,7 @@ def get_inventory():
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_financial_summary():
-    conn = sqlite3.connect("global.db")
+    conn = sqlite3.connect(DB_PATH)
     try:
         sales = pd.read_sql_query("SELECT SUM(invoice_Amount) as v FROM accounts_receivable", conn)
         ar = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_receivable WHERE status != 'Paid'",
@@ -854,18 +856,21 @@ def get_financial_summary():
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_performance():
-    conn = sqlite3.connect("global.db")
+    conn = sqlite3.connect(DB_PATH)
     try:
         return pd.read_sql_query("""SELECT s.supplier_Name, p.supplier_Rating, p.Priority, p.Notes
                                     FROM performance_notes p
                                              JOIN suppliers s ON p.supplier_ID = s.supplier_ID
                                     ORDER BY p.supplier_Rating DESC""", conn)
+    except Exception as e:
+        st.error(f"Performance query error: {e}")
+        return pd.DataFrame()
     finally:
         conn.close()
 
 
 def query_database(query):
-    conn = sqlite3.connect("global.db")
+    conn = sqlite3.connect(DB_PATH)
     try:
         if query.strip().upper().startswith('SELECT'):
             df = pd.read_sql_query(query, conn)
@@ -887,7 +892,7 @@ def query_database(query):
 def run_stock_monitor_agent():
     """Checks inventory, reasons about urgency, sends alerts autonomously"""
     try:
-        conn = sqlite3.connect("global.db")
+        conn = sqlite3.connect(DB_PATH)
         low_stock = pd.read_sql_query("""
                                       SELECT i.product_Name,
                                              i.stock_on_hand,
@@ -968,7 +973,7 @@ Then: SUMMARY: <one sentence>"""
 def run_ar_collection_agent():
     """Autonomously monitors overdue invoices and escalates collection actions"""
     try:
-        conn = sqlite3.connect("global.db")
+        conn = sqlite3.connect(DB_PATH)
         overdue = pd.read_sql_query("""
                                     SELECT receivable_ID,
                                            customer_Name,
@@ -1031,7 +1036,7 @@ def run_ar_collection_agent():
 def run_supplier_performance_agent():
     """Evaluates supplier reliability, detects underperformers, recommends changes"""
     try:
-        conn = sqlite3.connect("global.db")
+        conn = sqlite3.connect(DB_PATH)
         suppliers = pd.read_sql_query("""
                                       SELECT s.supplier_ID,
                                              s.supplier_Name,
@@ -1094,7 +1099,7 @@ RECOMMENDATION: <one action>"""
 def run_sales_forecasting_agent():
     """Analyses transaction history, detects trends, adjusts reorder recommendations"""
     try:
-        conn = sqlite3.connect("global.db")
+        conn = sqlite3.connect(DB_PATH)
         sales = pd.read_sql_query("""
                                   SELECT t.date, t.description, t.amount, t.category
                                   FROM transactions t
@@ -1153,7 +1158,7 @@ Be specific and actionable. Keep it concise."""
 def run_crm_agent():
     """Detects at-risk customers, identifies top customers, generates outreach"""
     try:
-        conn = sqlite3.connect("global.db")
+        conn = sqlite3.connect(DB_PATH)
         customers = pd.read_sql_query("""
                                       SELECT customer_ID,
                                              customer_Name,
@@ -1223,7 +1228,7 @@ Be concise and specific."""
 def run_financial_health_agent():
     """Monitors cash flow, AR/AP ratios, flags financial risks proactively"""
     try:
-        conn = sqlite3.connect("global.db")
+        conn = sqlite3.connect(DB_PATH)
         ar = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_receivable WHERE status != 'Paid'",
                                conn)
         ap = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_payable WHERE status != 'Paid'",
@@ -1307,7 +1312,7 @@ def run_goal_planning_agent(goal):
     """Given a high-level business goal, breaks it into steps and executes them"""
     try:
         # Gather all business context
-        conn = sqlite3.connect("global.db")
+        conn = sqlite3.connect(DB_PATH)
         inv_summary = pd.read_sql_query("SELECT product_Name, stock_on_hand, reorder_quantity FROM inventory",
                                         conn).to_string()
         fin_summary = pd.read_sql_query("SELECT account_Name, account_Type, balance FROM chart_of_accounts",
@@ -1452,7 +1457,7 @@ Final Answer: <answer>"""
 # INVOICE & SALE FUNCTIONS
 # ============================================
 def update_inventory(product_id, quantity_sold):
-    conn = sqlite3.connect("global.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT stock_on_hand, product_Name FROM inventory WHERE product_ID = ?", (product_id,))
@@ -1516,7 +1521,7 @@ def generate_invoice_pdf(invoice_data):
 
 
 def save_invoice_to_database(invoice_data):
-    conn = sqlite3.connect("global.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
         cursor.execute("""INSERT INTO accounts_receivable
@@ -1574,7 +1579,7 @@ def process_sale(customer_id, customer_name, customer_type, items, recipient_ema
 # ============================================
 def get_unread_alerts_count():
     try:
-        conn = sqlite3.connect("global.db")
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM agent_alerts WHERE is_read = 0")
         count = cursor.fetchone()[0]
@@ -1586,7 +1591,7 @@ def get_unread_alerts_count():
 
 def get_all_alerts(limit=50):
     try:
-        conn = sqlite3.connect("global.db")
+        conn = sqlite3.connect(DB_PATH)
         df = pd.read_sql_query(f"SELECT * FROM agent_alerts ORDER BY timestamp DESC LIMIT {limit}", conn)
         conn.close()
         return df
@@ -1596,7 +1601,7 @@ def get_all_alerts(limit=50):
 
 def mark_alerts_read():
     try:
-        conn = sqlite3.connect("global.db")
+        conn = sqlite3.connect(DB_PATH)
         conn.execute("UPDATE agent_alerts SET is_read = 1")
         conn.commit()
         conn.close()
@@ -1606,7 +1611,7 @@ def mark_alerts_read():
 
 def get_agent_logs(limit=30):
     try:
-        conn = sqlite3.connect("global.db")
+        conn = sqlite3.connect(DB_PATH)
         df = pd.read_sql_query(f"SELECT * FROM agent_logs ORDER BY timestamp DESC LIMIT {limit}", conn)
         conn.close()
         return df
@@ -2102,7 +2107,7 @@ elif "Financial Dashboard" in page:
     c2.metric("AR Outstanding", f"R{fin['total_ar']:,.2f}")
     c3.metric("AP Outstanding", f"R{fin['total_ap']:,.2f}")
     c4.metric("Owner Drawings", f"R{fin['total_drawings']:,.2f}")
-    conn = sqlite3.connect("global.db")
+    conn = sqlite3.connect(DB_PATH)
     ar = pd.read_sql_query(
         "SELECT receivable_ID,customer_Name,due_Date,invoice_Amount,outstanding_Balance,status FROM accounts_receivable WHERE status != 'Paid' ORDER BY due_Date",
         conn)
@@ -2136,7 +2141,7 @@ elif "Add Data" in page:
             s_products = st.text_input("Products")
             if st.form_submit_button("Add Supplier"):
                 try:
-                    conn = sqlite3.connect("global.db")
+                    conn = sqlite3.connect(DB_PATH)
                     conn.execute("INSERT INTO suppliers VALUES (?,?,?,?,?,?)",
                                  (s_id, s_name, s_account, s_wechat, s_website, s_products))
                     conn.execute("INSERT INTO performance_notes VALUES (?,?,?,?)",
@@ -2161,7 +2166,7 @@ elif "Add Data" in page:
             p_price = st.number_input("Selling Price (R)", min_value=0.0, format="%.2f")
             if st.form_submit_button("Add Product"):
                 try:
-                    conn = sqlite3.connect("global.db")
+                    conn = sqlite3.connect(DB_PATH)
                     conn.execute("INSERT INTO product VALUES (?,?,?,?,?,?,?,?,?)",
                                  (p_id, p_cat, p_name, p_sup, p_type, p_moq, p_lead, p_cost, p_price))
                     conn.execute("INSERT INTO inventory VALUES (?,?,?,?,?,?,?,?)",
@@ -2186,7 +2191,7 @@ elif "Add Data" in page:
             r_terms = st.selectbox("Terms", ["Net 30", "Net 45", "100% Prepayment", "To be confirmed"])
             if st.form_submit_button("Add Retailer"):
                 try:
-                    conn = sqlite3.connect("global.db")
+                    conn = sqlite3.connect(DB_PATH)
                     conn.execute("INSERT INTO retailers VALUES (?,?,?,?,?,?,?,?)",
                                  (r_id, r_name, r_status, r_qty, r_prod, r_ostatus, r_contact, r_terms))
                     conn.commit();
@@ -2204,7 +2209,7 @@ elif "Add Data" in page:
             c_email = st.text_input("Email")
             if st.form_submit_button("Add Customer"):
                 try:
-                    conn = sqlite3.connect("global.db")
+                    conn = sqlite3.connect(DB_PATH)
                     conn.execute("INSERT INTO customers VALUES (?,?,?,?,?,?,?,?)",
                                  (c_id, c_name, c_phone, c_email, 0, 0.00, 0.00, None))
                     conn.commit();
