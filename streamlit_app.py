@@ -115,12 +115,10 @@ st.markdown("""
 # ============================================
 # DATABASE INITIALIZATION
 # ============================================
-# Use /tmp so the DB is always writable on Streamlit Cloud (and locally)
 DB_PATH = os.path.join('/tmp', 'global.db')
 
 
 def init_database():
-    # Check if ALL required tables exist — if any are missing, rebuild from scratch
     required_tables = {'suppliers', 'product', 'retailers', 'customers', 'inventory',
                        'chart_of_accounts', 'accounts_receivable', 'accounts_payable',
                        'drawings', 'transactions', 'performance_notes',
@@ -133,8 +131,7 @@ def init_database():
             existing = {row[0] for row in cursor.fetchall()}
             conn.close()
             if required_tables.issubset(existing):
-                return  # All tables present, nothing to do
-            # Some tables missing — delete and recreate
+                return
             os.remove(DB_PATH)
         except Exception:
             pass
@@ -142,336 +139,68 @@ def init_database():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS suppliers
-    (
-        supplier_ID
-        VARCHAR
-                      (
-        10
-                      ) PRIMARY KEY, supplier_Name VARCHAR
-                      (
-                          100
-                      ) NOT NULL,
-        Account VARCHAR
-                      (
-                          100
-                      ), wechat_Contact VARCHAR
-                      (
-                          100
-                      ), Website VARCHAR
-                      (
-                          255
-                      ), products TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS suppliers (
+        supplier_ID VARCHAR(10) PRIMARY KEY, supplier_Name VARCHAR(100) NOT NULL,
+        Account VARCHAR(100), wechat_Contact VARCHAR(100), Website VARCHAR(255), products TEXT)''')
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS product
-    (
-        product_ID
-        VARCHAR
-                      (
-        10
-                      ) PRIMARY KEY, product_Categories VARCHAR
-                      (
-                          100
-                      ),
-        products_ID VARCHAR
-                      (
-                          100
-                      ), supplier_ID VARCHAR
-                      (
-                          10
-                      ), supplier_Type VARCHAR
-                      (
-                          50
-                      ),
-        MOQ VARCHAR
-                      (
-                          50
-                      ), lead_Times VARCHAR
-                      (
-                          50
-                      ), unit_Cost DECIMAL
-                      (
-                          10,
-                          2
-                      ), selling_Price DECIMAL
-                      (
-                          10,
-                          2
-                      ),
-        FOREIGN KEY
-                      (
-                          supplier_ID
-                      ) REFERENCES suppliers
-                      (
-                          supplier_ID
-                      ))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS product (
+        product_ID VARCHAR(10) PRIMARY KEY, product_Categories VARCHAR(100),
+        products_ID VARCHAR(100), supplier_ID VARCHAR(10), supplier_Type VARCHAR(50),
+        MOQ VARCHAR(50), lead_Times VARCHAR(50), unit_Cost DECIMAL(10,2), selling_Price DECIMAL(10,2),
+        FOREIGN KEY (supplier_ID) REFERENCES suppliers(supplier_ID))''')
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS retailers
-    (
-        retailer_ID
-        VARCHAR
-                      (
-        10
-                      ) PRIMARY KEY, retailer_Name VARCHAR
-                      (
-                          100
-                      ) NOT NULL,
-        status VARCHAR
-                      (
-                          20
-                      ), order_Quantity VARCHAR
-                      (
-                          50
-                      ), product TEXT,
-        order_Status VARCHAR
-                      (
-                          50
-                      ), management_Contacts VARCHAR
-                      (
-                          100
-                      ), payment_Terms VARCHAR
-                      (
-                          50
-                      ))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS retailers (
+        retailer_ID VARCHAR(10) PRIMARY KEY, retailer_Name VARCHAR(100) NOT NULL,
+        status VARCHAR(20), order_Quantity VARCHAR(50), product TEXT,
+        order_Status VARCHAR(50), management_Contacts VARCHAR(100), payment_Terms VARCHAR(50))''')
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS customers
-    (
-        customer_ID
-        VARCHAR
-                      (
-        10
-                      ) PRIMARY KEY, customer_Name VARCHAR
-                      (
-                          100
-                      ) NOT NULL,
-        contact_Number VARCHAR
-                      (
-                          20
-                      ), email VARCHAR
-                      (
-                          100
-                      ), total_orders INT DEFAULT 0,
-        total_spent DECIMAL
-                      (
-                          10,
-                          2
-                      ) DEFAULT 0.00, outstanding_balance DECIMAL
-                      (
-                          10,
-                          2
-                      ) DEFAULT 0.00,
+    cursor.execute('''CREATE TABLE IF NOT EXISTS customers (
+        customer_ID VARCHAR(10) PRIMARY KEY, customer_Name VARCHAR(100) NOT NULL,
+        contact_Number VARCHAR(20), email VARCHAR(100), total_orders INT DEFAULT 0,
+        total_spent DECIMAL(10,2) DEFAULT 0.00, outstanding_balance DECIMAL(10,2) DEFAULT 0.00,
         last_order_date DATE)''')
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS inventory
-    (
-        inventory_ID
-        VARCHAR
-                      (
-        10
-                      ) PRIMARY KEY, product_ID VARCHAR
-                      (
-                          10
-                      ), product_Name VARCHAR
-                      (
-                          100
-                      ),
-        stock_on_hand INT, reorder_level INT, reorder_quantity INT, location VARCHAR
-                      (
-                          50
-                      ),
-        last_updated DATE, FOREIGN KEY
-                      (
-                          product_ID
-                      ) REFERENCES product
-                      (
-                          product_ID
-                      ))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS inventory (
+        inventory_ID VARCHAR(10) PRIMARY KEY, product_ID VARCHAR(10), product_Name VARCHAR(100),
+        stock_on_hand INT, reorder_level INT, reorder_quantity INT, location VARCHAR(50),
+        last_updated DATE, FOREIGN KEY (product_ID) REFERENCES product(product_ID))''')
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS chart_of_accounts
-    (
-        account_ID
-        VARCHAR
-                      (
-        10
-                      ) PRIMARY KEY, account_Name VARCHAR
-                      (
-                          100
-                      ),
-        account_Type VARCHAR
-                      (
-                          50
-                      ), balance DECIMAL
-                      (
-                          12,
-                          2
-                      ))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS chart_of_accounts (
+        account_ID VARCHAR(10) PRIMARY KEY, account_Name VARCHAR(100),
+        account_Type VARCHAR(50), balance DECIMAL(12,2))''')
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS accounts_receivable
-    (
-        receivable_ID
-        VARCHAR
-                      (
-        10
-                      ) PRIMARY KEY, customer_ID VARCHAR
-                      (
-                          10
-                      ),
-        customer_Name VARCHAR
-                      (
-                          100
-                      ), invoice_Date DATE, due_Date DATE,
-        invoice_Amount DECIMAL
-                      (
-                          10,
-                          2
-                      ), amount_Paid DECIMAL
-                      (
-                          10,
-                          2
-                      ) DEFAULT 0.00,
-        outstanding_Balance DECIMAL
-                      (
-                          10,
-                          2
-                      ), status VARCHAR
-                      (
-                          20
-                      ))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS accounts_receivable (
+        receivable_ID VARCHAR(10) PRIMARY KEY, customer_ID VARCHAR(10),
+        customer_Name VARCHAR(100), invoice_Date DATE, due_Date DATE,
+        invoice_Amount DECIMAL(10,2), amount_Paid DECIMAL(10,2) DEFAULT 0.00,
+        outstanding_Balance DECIMAL(10,2), status VARCHAR(20))''')
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS accounts_payable
-    (
-        payable_ID
-        VARCHAR
-                      (
-        10
-                      ) PRIMARY KEY, supplier_ID VARCHAR
-                      (
-                          10
-                      ),
-        supplier_Name VARCHAR
-                      (
-                          100
-                      ), invoice_Date DATE, due_Date DATE,
-        invoice_Amount DECIMAL
-                      (
-                          10,
-                          2
-                      ), amount_Paid DECIMAL
-                      (
-                          10,
-                          2
-                      ) DEFAULT 0.00,
-        outstanding_Balance DECIMAL
-                      (
-                          10,
-                          2
-                      ), status VARCHAR
-                      (
-                          20
-                      ),
-        FOREIGN KEY
-                      (
-                          supplier_ID
-                      ) REFERENCES suppliers
-                      (
-                          supplier_ID
-                      ))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS accounts_payable (
+        payable_ID VARCHAR(10) PRIMARY KEY, supplier_ID VARCHAR(10),
+        supplier_Name VARCHAR(100), invoice_Date DATE, due_Date DATE,
+        invoice_Amount DECIMAL(10,2), amount_Paid DECIMAL(10,2) DEFAULT 0.00,
+        outstanding_Balance DECIMAL(10,2), status VARCHAR(20),
+        FOREIGN KEY (supplier_ID) REFERENCES suppliers(supplier_ID))''')
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS drawings
-    (
-        drawing_ID
-        VARCHAR
-                      (
-        10
-                      ) PRIMARY KEY, date DATE, amount DECIMAL
-                      (
-                          10,
-                          2
-                      ),
-        description VARCHAR
-                      (
-                          200
-                      ), notes TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS drawings (
+        drawing_ID VARCHAR(10) PRIMARY KEY, date DATE, amount DECIMAL(10,2),
+        description VARCHAR(200), notes TEXT)''')
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS transactions
-    (
-        transaction_ID
-        VARCHAR
-                      (
-        10
-                      ) PRIMARY KEY, date DATE, description VARCHAR
-                      (
-                          200
-                      ),
-        account_Debit VARCHAR
-                      (
-                          10
-                      ), account_Credit VARCHAR
-                      (
-                          10
-                      ), amount DECIMAL
-                      (
-                          10,
-                          2
-                      ), category VARCHAR
-                      (
-                          50
-                      ))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS transactions (
+        transaction_ID VARCHAR(10) PRIMARY KEY, date DATE, description VARCHAR(200),
+        account_Debit VARCHAR(10), account_Credit VARCHAR(10), amount DECIMAL(10,2), category VARCHAR(50))''')
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS performance_notes
-    (
-        supplier_ID
-        VARCHAR
-                      (
-        10
-                      ) PRIMARY KEY, supplier_Rating INT, Priority VARCHAR
-                      (
-                          20
-                      ), Notes TEXT,
-        FOREIGN KEY
-                      (
-                          supplier_ID
-                      ) REFERENCES suppliers
-                      (
-                          supplier_ID
-                      ))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS performance_notes (
+        supplier_ID VARCHAR(10) PRIMARY KEY, supplier_Rating INT, Priority VARCHAR(20), Notes TEXT,
+        FOREIGN KEY (supplier_ID) REFERENCES suppliers(supplier_ID))''')
 
-    # Agent logs table
-    cursor.execute('''CREATE TABLE IF NOT EXISTS agent_logs
-    (
-        log_ID
-        INTEGER
-        PRIMARY
-        KEY
-        AUTOINCREMENT,
-        agent_name
-        VARCHAR
-                      (
-        50
-                      ),
-        action_taken TEXT, result TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-        severity VARCHAR
-                      (
-                          20
-                      ))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS agent_logs (
+        log_ID INTEGER PRIMARY KEY AUTOINCREMENT, agent_name VARCHAR(50),
+        action_taken TEXT, result TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, severity VARCHAR(20))''')
 
-    # Agent alerts table
-    cursor.execute('''CREATE TABLE IF NOT EXISTS agent_alerts
-    (
-        alert_ID
-        INTEGER
-        PRIMARY
-        KEY
-        AUTOINCREMENT,
-        agent_name
-        VARCHAR
-                      (
-        50
-                      ),
-        alert_type VARCHAR
-                      (
-                          50
-                      ), message TEXT, is_read INTEGER DEFAULT 0,
+    cursor.execute('''CREATE TABLE IF NOT EXISTS agent_alerts (
+        alert_ID INTEGER PRIMARY KEY AUTOINCREMENT, agent_name VARCHAR(50),
+        alert_type VARCHAR(50), message TEXT, is_read INTEGER DEFAULT 0,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
 
     suppliers_data = [
@@ -489,19 +218,14 @@ def init_database():
     cursor.executemany('INSERT INTO suppliers VALUES (?,?,?,?,?,?)', suppliers_data)
 
     product_data = [
-        ('p001', 'Bedding', 'Egyptian Cotton Bed Sheet Set', 's001', 'Manufacturer', '20 units', '15 days', 187.50,
-         399.00),
-        ('p002', 'Bedding', 'Microfleece Blanket - Queen', 's001', 'Manufacturer', '30 units', '12 days', 124.75,
-         279.00),
+        ('p001', 'Bedding', 'Egyptian Cotton Bed Sheet Set', 's001', 'Manufacturer', '20 units', '15 days', 187.50, 399.00),
+        ('p002', 'Bedding', 'Microfleece Blanket - Queen', 's001', 'Manufacturer', '30 units', '12 days', 124.75, 279.00),
         ('p003', 'Curtains', 'Thermal Blackout Curtains', 's003', 'Wholesaler', '15 pairs', '10 days', 213.00, 449.00),
         ('p004', 'Pots', 'Glazed Ceramic Flower Pot Set', 's002', 'Manufacturer', '10 sets', '20 days', 156.25, 349.00),
-        ('p005', 'Bedding', 'Organic Bamboo Pillowcase Set', 's005', 'Manufacturer', '25 units', '14 days', 94.50,
-         199.00),
-        ('p006', 'Curtains', 'Sheer Voile Curtains - Ivory', 's003', 'Wholesaler', '20 pairs', '10 days', 114.25,
-         259.00),
+        ('p005', 'Bedding', 'Organic Bamboo Pillowcase Set', 's005', 'Manufacturer', '25 units', '14 days', 94.50, 199.00),
+        ('p006', 'Curtains', 'Sheer Voile Curtains - Ivory', 's003', 'Wholesaler', '20 pairs', '10 days', 114.25, 259.00),
         ('p007', 'Pots', 'Handcrafted Stoneware Vase', 's002', 'Manufacturer', '8 units', '18 days', 88.75, 189.00),
-        ('p008', 'Storage', 'Airtight Food Storage Set (5pc)', 's004', 'Manufacturer', '40 units', '7 days', 47.25,
-         119.00),
+        ('p008', 'Storage', 'Airtight Food Storage Set (5pc)', 's004', 'Manufacturer', '40 units', '7 days', 47.25, 119.00),
         ('p009', 'Bedding', 'Weighted Blanket - 6.8kg', 's005', 'Manufacturer', '15 units', '21 days', 291.50, 599.00),
         ('p010', 'Storage', 'Woven Bamboo Storage Baskets', 's004', 'Distributor', '25 units', '10 days', 67.80, 159.00)
     ]
@@ -551,8 +275,7 @@ def init_database():
 
     performance_notes_data = [
         ('s001', 5, 'Main', 'Reliable manufacturer, excellent quality bedding. Communication with Wang Wei is prompt.'),
-        ('s002', 4, 'Main',
-         'Beautiful ceramic products. Li Fang is very helpful. Lead times can be longer during peak season.'),
+        ('s002', 4, 'Main', 'Beautiful ceramic products. Li Fang is very helpful. Lead times can be longer during peak season.'),
         ('s003', 4, 'Alternative', 'Good wholesale pricing. Chen Min responds quickly. Quality consistent.'),
         ('s004', 3, 'Reserve', 'Zhang Yong is professional but MOQ is high. Testing smaller orders first.'),
         ('s005', 5, 'Main', 'Liu Na provides excellent customer service. Premium bedding products. Highly recommended.')
@@ -639,7 +362,6 @@ def init_database():
     conn.close()
 
 
-# Always run init — it checks all tables and only rebuilds if needed
 try:
     init_database()
 except Exception as e:
@@ -647,13 +369,18 @@ except Exception as e:
     st.stop()
 
 # ============================================
-# API KEY CHECK
+# API KEY CHECK  ← FIXED: reads st.secrets first, falls back to os.getenv
 # ============================================
-if not os.getenv("GROQ_API_KEY"):
-    st.error("🚨 GROQ_API_KEY is not set.")
+try:
+    groq_api_key = st.secrets.get("GROQ_API_KEY")
+except Exception:
+    groq_api_key = None
+groq_api_key = groq_api_key or os.getenv("GROQ_API_KEY")
+if not groq_api_key:
+    st.error("🚨 GROQ_API_KEY is not set. Add it to Streamlit secrets or your .env file.")
     st.stop()
 
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+groq_client = Groq(api_key=groq_api_key)
 
 
 # ============================================
@@ -706,7 +433,7 @@ def send_whatsapp_notification(message, phone=None):
     twilio_whatsapp = os.getenv("TWILIO_WHATSAPP_FROM", "")
     owner_phone = phone or os.getenv("OWNER_WHATSAPP", "")
     if not all([twilio_sid, twilio_token, twilio_whatsapp, owner_phone]):
-        return False, "WhatsApp (Twilio) not configured — add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM, OWNER_WHATSAPP to secrets"
+        return False, "WhatsApp (Twilio) not configured"
     try:
         from twilio.rest import Client
         client = Client(twilio_sid, twilio_token)
@@ -741,12 +468,8 @@ def create_alert(agent_name, alert_type, message):
 
 
 def notify_all(subject, message, severity="info"):
-    """Send notification via all configured channels + create in-app alert"""
-    # In-app alert
     create_alert("System", severity, message)
-    # Email
     send_email_notification(f"[Global Trends AI] {subject}", message)
-    # WhatsApp
     send_whatsapp_notification(f"🌍 Global Trends AI\n{subject}\n\n{message}")
 
 
@@ -796,7 +519,7 @@ def get_inventory():
     try:
         return pd.read_sql_query("""SELECT i.*, p.selling_Price, p.unit_Cost
                                     FROM inventory i
-                                             LEFT JOIN product p ON i.product_ID = p.product_ID
+                                    LEFT JOIN product p ON i.product_ID = p.product_ID
                                     ORDER BY i.stock_on_hand ASC""", conn)
     finally:
         conn.close()
@@ -807,10 +530,8 @@ def get_financial_summary():
     conn = sqlite3.connect(DB_PATH)
     try:
         sales = pd.read_sql_query("SELECT SUM(invoice_Amount) as v FROM accounts_receivable", conn)
-        ar = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_receivable WHERE status != 'Paid'",
-                               conn)
-        ap = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_payable WHERE status != 'Paid'",
-                               conn)
+        ar = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_receivable WHERE status != 'Paid'", conn)
+        ap = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_payable WHERE status != 'Paid'", conn)
         drawings = pd.read_sql_query("SELECT SUM(amount) as v FROM drawings", conn)
         return {
             'total_sales': sales['v'].iloc[0] or 0,
@@ -828,7 +549,7 @@ def get_performance():
     try:
         return pd.read_sql_query("""SELECT s.supplier_Name, p.supplier_Rating, p.Priority, p.Notes
                                     FROM performance_notes p
-                                             JOIN suppliers s ON p.supplier_ID = s.supplier_ID
+                                    JOIN suppliers s ON p.supplier_ID = s.supplier_ID
                                     ORDER BY p.supplier_Rating DESC""", conn)
     except Exception as e:
         st.error(f"Performance query error: {e}")
@@ -851,51 +572,34 @@ def query_database(query):
 
 
 # ============================================
-# ============================================
 # 7 AUTONOMOUS AI AGENTS
 # ============================================
-# ============================================
 
-# ── AGENT 1: PROACTIVE STOCK MONITOR ──────
 def run_stock_monitor_agent():
-    """Checks inventory, reasons about urgency, sends alerts autonomously"""
     try:
         conn = sqlite3.connect(DB_PATH)
         low_stock = pd.read_sql_query("""
-                                      SELECT i.product_Name,
-                                             i.stock_on_hand,
-                                             i.reorder_level,
-                                             i.reorder_quantity,
-                                             p.supplier_ID,
-                                             s.supplier_Name,
-                                             s.Account
-                                      FROM inventory i
-                                               LEFT JOIN product p ON i.product_ID = p.product_ID
-                                               LEFT JOIN suppliers s ON p.supplier_ID = s.supplier_ID
-                                      WHERE i.stock_on_hand <= i.reorder_level
-                                      """, conn)
+            SELECT i.product_Name, i.stock_on_hand, i.reorder_level, i.reorder_quantity,
+                   p.supplier_ID, s.supplier_Name, s.Account
+            FROM inventory i
+            LEFT JOIN product p ON i.product_ID = p.product_ID
+            LEFT JOIN suppliers s ON p.supplier_ID = s.supplier_ID
+            WHERE i.stock_on_hand <= i.reorder_level
+        """, conn)
         critical = pd.read_sql_query("""
-                                     SELECT product_Name, stock_on_hand, reorder_level
-                                     FROM inventory
-                                     WHERE stock_on_hand = 0
-                                     """, conn)
+            SELECT product_Name, stock_on_hand, reorder_level
+            FROM inventory WHERE stock_on_hand = 0
+        """, conn)
         conn.close()
-
-        actions_taken = []
 
         if low_stock.empty:
             log_agent_action("Stock Monitor", "Inventory check", "All stock levels healthy ✅", "info")
             return {"status": "healthy", "alerts": [], "low_stock": pd.DataFrame()}
 
-        # Reason about urgency using Groq
-        stock_summary = low_stock[
-            ['product_Name', 'stock_on_hand', 'reorder_level', 'reorder_quantity', 'supplier_Name']].to_string()
+        stock_summary = low_stock[['product_Name', 'stock_on_hand', 'reorder_level', 'reorder_quantity', 'supplier_Name']].to_string()
         reasoning = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{
-                "role": "user",
-                "content": f"""You are an inventory management agent for Global Trends.
-
+            messages=[{"role": "user", "content": f"""You are an inventory management agent for Global Trends.
 Analyze this low stock situation and provide:
 1. Urgency level (CRITICAL/HIGH/MEDIUM) for each item
 2. Recommended action for each
@@ -905,12 +609,11 @@ Low stock items:
 {stock_summary}
 
 Format as: ITEM | URGENCY | ACTION
-Then: SUMMARY: <one sentence>"""
-            }],
+Then: SUMMARY: <one sentence>"""}],
             max_tokens=500, temperature=0.1
         ).choices[0].message.content
 
-        # Create alerts for each low stock item
+        actions_taken = []
         for _, row in low_stock.iterrows():
             msg = f"⚠️ LOW STOCK: {row['product_Name']} has {row['stock_on_hand']} units (reorder level: {row['reorder_level']}). Supplier: {row['supplier_Name']}. Reorder {row['reorder_quantity']} units."
             create_alert("Stock Monitor", "low_stock", msg)
@@ -922,11 +625,9 @@ Then: SUMMARY: <one sentence>"""
                 create_alert("Stock Monitor", "critical_stock", msg)
                 notify_all("CRITICAL: Out of Stock", msg, "critical")
 
-        # Send consolidated notification
         summary_msg = f"Stock Monitor Agent Report\n\n{len(low_stock)} products below reorder level.\n\nAI Analysis:\n{reasoning}"
         send_email_notification("⚠️ Stock Alert - Action Required", summary_msg)
         send_whatsapp_notification(f"⚠️ Stock Alert: {len(low_stock)} products need reordering. Check your dashboard.")
-
         log_agent_action("Stock Monitor", f"Checked inventory, found {len(low_stock)} low stock items",
                          f"Notifications sent. {reasoning[:200]}", "warning")
 
@@ -937,24 +638,16 @@ Then: SUMMARY: <one sentence>"""
         return {"status": "error", "error": str(e)}
 
 
-# ── AGENT 2: ACCOUNTS RECEIVABLE COLLECTION ──
 def run_ar_collection_agent():
-    """Autonomously monitors overdue invoices and escalates collection actions"""
     try:
         conn = sqlite3.connect(DB_PATH)
         overdue = pd.read_sql_query("""
-                                    SELECT receivable_ID,
-                                           customer_Name,
-                                           customer_ID,
-                                           due_Date,
-                                           outstanding_Balance,
-                                           invoice_Date,
-                                           CAST(julianday('now') - julianday(due_Date) AS INTEGER) as days_overdue
-                                    FROM accounts_receivable
-                                    WHERE status != 'Paid' AND outstanding_Balance > 0
-            AND due_Date < date('now')
-                                    ORDER BY days_overdue DESC
-                                    """, conn)
+            SELECT receivable_ID, customer_Name, customer_ID, due_Date, outstanding_Balance, invoice_Date,
+                   CAST(julianday('now') - julianday(due_Date) AS INTEGER) as days_overdue
+            FROM accounts_receivable
+            WHERE status != 'Paid' AND outstanding_Balance > 0 AND due_Date < date('now')
+            ORDER BY days_overdue DESC
+        """, conn)
         conn.close()
 
         if overdue.empty:
@@ -969,25 +662,19 @@ def run_ar_collection_agent():
             inv_id = row['receivable_ID']
 
             if days >= 30:
-                # ESCALATION — final notice
                 msg = f"🚨 FINAL NOTICE [{inv_id}]: {customer} owes R{amount:,.2f} — {days} days overdue. Escalate immediately."
                 create_alert("AR Collection", "final_notice", msg)
                 notify_all(f"Final Notice: {customer}", msg, "critical")
                 actions.append({"customer": customer, "action": "Final notice sent", "days": days, "amount": amount})
-
             elif days >= 14:
-                # Firm reminder
                 msg = f"⚠️ FIRM REMINDER [{inv_id}]: {customer} owes R{amount:,.2f} — {days} days overdue."
                 create_alert("AR Collection", "firm_reminder", msg)
                 send_email_notification(f"Overdue Invoice Reminder - {customer}", msg)
                 actions.append({"customer": customer, "action": "Firm reminder sent", "days": days, "amount": amount})
-
             elif days >= 7:
-                # Gentle reminder
                 msg = f"📬 REMINDER [{inv_id}]: {customer} has an outstanding balance of R{amount:,.2f} — {days} days overdue."
                 create_alert("AR Collection", "gentle_reminder", msg)
-                actions.append(
-                    {"customer": customer, "action": "Gentle reminder logged", "days": days, "amount": amount})
+                actions.append({"customer": customer, "action": "Gentle reminder logged", "days": days, "amount": amount})
 
         total_overdue = overdue['outstanding_Balance'].sum()
         log_agent_action("AR Collection", f"Processed {len(overdue)} overdue invoices",
@@ -1000,34 +687,23 @@ def run_ar_collection_agent():
         return {"status": "error", "error": str(e)}
 
 
-# ── AGENT 3: SUPPLIER PERFORMANCE AGENT ──
 def run_supplier_performance_agent():
-    """Evaluates supplier reliability, detects underperformers, recommends changes"""
     try:
         conn = sqlite3.connect(DB_PATH)
         suppliers = pd.read_sql_query("""
-                                      SELECT s.supplier_ID,
-                                             s.supplier_Name,
-                                             p.supplier_Rating,
-                                             p.Priority,
-                                             p.Notes,
-                                             COUNT(ap.payable_ID)   as invoice_count,
-                                             SUM(ap.invoice_Amount) as total_spent
-                                      FROM suppliers s
-                                               LEFT JOIN performance_notes p ON s.supplier_ID = p.supplier_ID
-                                               LEFT JOIN accounts_payable ap ON s.supplier_ID = ap.supplier_ID
-                                      GROUP BY s.supplier_ID
-                                      """, conn)
+            SELECT s.supplier_ID, s.supplier_Name, p.supplier_Rating, p.Priority, p.Notes,
+                   COUNT(ap.payable_ID) as invoice_count, SUM(ap.invoice_Amount) as total_spent
+            FROM suppliers s
+            LEFT JOIN performance_notes p ON s.supplier_ID = p.supplier_ID
+            LEFT JOIN accounts_payable ap ON s.supplier_ID = ap.supplier_ID
+            GROUP BY s.supplier_ID
+        """, conn)
         conn.close()
 
-        # Ask AI to reason about supplier health
         supplier_data = suppliers[['supplier_Name', 'supplier_Rating', 'Priority', 'total_spent']].to_string()
         analysis = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{
-                "role": "user",
-                "content": f"""You are a supplier performance agent for Global Trends.
-
+            messages=[{"role": "user", "content": f"""You are a supplier performance agent for Global Trends.
 Analyze these suppliers and:
 1. Identify any underperforming suppliers (rating < 4)
 2. Recommend priority changes if needed
@@ -1041,12 +717,10 @@ Be concise. Format as:
 HEALTH: Good/At Risk/Critical
 UNDERPERFORMERS: <list or None>
 RISKS: <list or None>
-RECOMMENDATION: <one action>"""
-            }],
+RECOMMENDATION: <one action>"""}],
             max_tokens=400, temperature=0.1
         ).choices[0].message.content
 
-        # Flag low-rated suppliers
         alerts = []
         if not suppliers.empty:
             low_rated = suppliers[pd.to_numeric(suppliers['supplier_Rating'], errors='coerce') < 4]
@@ -1063,26 +737,19 @@ RECOMMENDATION: <one action>"""
         return {"status": "error", "error": str(e)}
 
 
-# ── AGENT 4: SALES TREND & DEMAND FORECASTING ──
 def run_sales_forecasting_agent():
-    """Analyses transaction history, detects trends, adjusts reorder recommendations"""
     try:
         conn = sqlite3.connect(DB_PATH)
         sales = pd.read_sql_query("""
-                                  SELECT t.date, t.description, t.amount, t.category
-                                  FROM transactions t
-                                  WHERE t.category IN ('Sale', 'Cost')
-                                  ORDER BY t.date
-                                  """, conn)
+            SELECT t.date, t.description, t.amount, t.category
+            FROM transactions t
+            WHERE t.category IN ('Sale', 'Cost')
+            ORDER BY t.date
+        """, conn)
         inventory = pd.read_sql_query("""
-                                      SELECT i.product_Name,
-                                             i.stock_on_hand,
-                                             i.reorder_quantity,
-                                             p.selling_Price,
-                                             p.unit_Cost
-                                      FROM inventory i
-                                               JOIN product p ON i.product_ID = p.product_ID
-                                      """, conn)
+            SELECT i.product_Name, i.stock_on_hand, i.reorder_quantity, p.selling_Price, p.unit_Cost
+            FROM inventory i JOIN product p ON i.product_ID = p.product_ID
+        """, conn)
         conn.close()
 
         sales_summary = f"Total transactions: {len(sales)}\nTotal sales value: R{sales[sales['category'] == 'Sale']['amount'].sum():,.2f}"
@@ -1090,10 +757,7 @@ def run_sales_forecasting_agent():
 
         forecast = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{
-                "role": "user",
-                "content": f"""You are a sales forecasting agent for Global Trends, a home goods trading company.
-
+            messages=[{"role": "user", "content": f"""You are a sales forecasting agent for Global Trends, a home goods trading company.
 Based on the sales data and inventory below, provide:
 1. Top performing product categories (infer from descriptions)
 2. Demand trend (growing/stable/declining)
@@ -1107,8 +771,7 @@ Sales data:
 Current inventory:
 {inv_summary}
 
-Be specific and actionable. Keep it concise."""
-            }],
+Be specific and actionable. Keep it concise."""}],
             max_tokens=500, temperature=0.2
         ).choices[0].message.content
 
@@ -1122,30 +785,18 @@ Be specific and actionable. Keep it concise."""
         return {"status": "error", "error": str(e)}
 
 
-# ── AGENT 5: CUSTOMER RELATIONSHIP AGENT ──
 def run_crm_agent():
-    """Detects at-risk customers, identifies top customers, generates outreach"""
     try:
         conn = sqlite3.connect(DB_PATH)
         customers = pd.read_sql_query("""
-                                      SELECT customer_ID,
-                                             customer_Name,
-                                             email,
-                                             contact_Number,
-                                             total_orders,
-                                             total_spent,
-                                             outstanding_balance,
-                                             last_order_date,
-                                             CAST(julianday('now') -
-                                                  julianday(COALESCE(last_order_date, '2025-01-01')) AS INTEGER) as days_since_order
-                                      FROM customers
-                                      ORDER BY total_spent DESC
-                                      """, conn)
+            SELECT customer_ID, customer_Name, email, contact_Number, total_orders, total_spent,
+                   outstanding_balance, last_order_date,
+                   CAST(julianday('now') - julianday(COALESCE(last_order_date, '2025-01-01')) AS INTEGER) as days_since_order
+            FROM customers ORDER BY total_spent DESC
+        """, conn)
         conn.close()
 
         actions = []
-
-        # Detect churning customers (no order in 30+ days)
         if 'days_since_order' in customers.columns:
             at_risk = customers[customers['days_since_order'] >= 30]
             for _, row in at_risk.iterrows():
@@ -1154,18 +805,13 @@ def run_crm_agent():
                 create_alert("CRM Agent", "churn_risk", msg)
                 actions.append({"customer": row['customer_Name'], "issue": "churn_risk", "days": days})
 
-        # Top customers recognition
         top = customers.nlargest(3, 'total_spent')
         top_names = ", ".join(top['customer_Name'].tolist())
 
-        # AI generates personalised outreach strategy
         customer_data = customers[['customer_Name', 'total_orders', 'total_spent', 'days_since_order']].to_string()
         strategy = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{
-                "role": "user",
-                "content": f"""You are a customer relationship agent for Global Trends.
-
+            messages=[{"role": "user", "content": f"""You are a customer relationship agent for Global Trends.
 Analyze these customers and:
 1. Identify the top 3 VIP customers worth nurturing
 2. List customers at churn risk and why
@@ -1175,8 +821,7 @@ Analyze these customers and:
 Customer data:
 {customer_data}
 
-Be concise and specific."""
-            }],
+Be concise and specific."""}],
             max_tokens=400, temperature=0.2
         ).choices[0].message.content
 
@@ -1192,18 +837,12 @@ Be concise and specific."""
         return {"status": "error", "error": str(e)}
 
 
-# ── AGENT 6: FINANCIAL HEALTH MONITOR ──
 def run_financial_health_agent():
-    """Monitors cash flow, AR/AP ratios, flags financial risks proactively"""
     try:
         conn = sqlite3.connect(DB_PATH)
-        ar = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_receivable WHERE status != 'Paid'",
-                               conn)
-        ap = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_payable WHERE status != 'Paid'",
-                               conn)
-        cash = pd.read_sql_query(
-            "SELECT SUM(balance) as v FROM chart_of_accounts WHERE account_Type = 'Asset' AND account_Name LIKE '%Cash%'",
-            conn)
+        ar = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_receivable WHERE status != 'Paid'", conn)
+        ap = pd.read_sql_query("SELECT SUM(outstanding_Balance) as v FROM accounts_payable WHERE status != 'Paid'", conn)
+        cash = pd.read_sql_query("SELECT SUM(balance) as v FROM chart_of_accounts WHERE account_Type = 'Asset' AND account_Name LIKE '%Cash%'", conn)
         drawings = pd.read_sql_query("SELECT SUM(amount) as v FROM drawings", conn)
         revenue = pd.read_sql_query("SELECT SUM(invoice_Amount) as v FROM accounts_receivable", conn)
         expenses = pd.read_sql_query("SELECT SUM(amount) as v FROM transactions WHERE category = 'Expense'", conn)
@@ -1217,12 +856,8 @@ def run_financial_health_agent():
         total_expenses = float(expenses['v'].iloc[0] or 0)
 
         metrics = {
-            "total_ar": total_ar,
-            "total_ap": total_ap,
-            "total_cash": total_cash,
-            "total_drawings": total_drawings,
-            "total_revenue": total_revenue,
-            "total_expenses": total_expenses,
+            "total_ar": total_ar, "total_ap": total_ap, "total_cash": total_cash,
+            "total_drawings": total_drawings, "total_revenue": total_revenue, "total_expenses": total_expenses,
             "net_cashflow": total_ar - total_ap,
             "drawings_to_revenue_pct": (total_drawings / total_revenue * 100) if total_revenue > 0 else 0
         }
@@ -1238,10 +873,7 @@ Net Cash Position: R{total_ar - total_ap:,.2f}
 """
         analysis = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{
-                "role": "user",
-                "content": f"""You are a financial health monitoring agent for Global Trends.
-
+            messages=[{"role": "user", "content": f"""You are a financial health monitoring agent for Global Trends.
 Analyze this financial snapshot and:
 1. Rate overall financial health (Excellent/Good/At Risk/Critical)
 2. Identify the top 2 financial risks
@@ -1252,17 +884,14 @@ Analyze this financial snapshot and:
 Financial data:
 {financial_summary}
 
-Be specific and direct."""
-            }],
+Be specific and direct."""}],
             max_tokens=400, temperature=0.1
         ).choices[0].message.content
 
-        # Auto-alert if AP > AR (cash flow risk)
         if total_ap > total_ar:
             msg = f"🚨 CASH FLOW RISK: Payables (R{total_ap:,.2f}) exceed receivables (R{total_ar:,.2f}). Immediate action needed."
             notify_all("Cash Flow Risk Detected", msg, "critical")
 
-        # Alert if drawings > 20% of revenue
         if metrics['drawings_to_revenue_pct'] > 20:
             msg = f"⚠️ DRAWINGS ALERT: Owner drawings are {metrics['drawings_to_revenue_pct']:.1f}% of revenue — above the 20% threshold."
             create_alert("Financial Health", "high_drawings", msg)
@@ -1275,27 +904,18 @@ Be specific and direct."""
         return {"status": "error", "error": str(e)}
 
 
-# ── AGENT 7: MULTI-STEP GOAL PLANNING ──
 def run_goal_planning_agent(goal):
-    """Given a high-level business goal, breaks it into steps and executes them"""
     try:
-        # Gather all business context
         conn = sqlite3.connect(DB_PATH)
-        inv_summary = pd.read_sql_query("SELECT product_Name, stock_on_hand, reorder_quantity FROM inventory",
-                                        conn).to_string()
-        fin_summary = pd.read_sql_query("SELECT account_Name, account_Type, balance FROM chart_of_accounts",
-                                        conn).to_string()
-        sales_summary = pd.read_sql_query("SELECT category, SUM(amount) as total FROM transactions GROUP BY category",
-                                          conn).to_string()
+        inv_summary = pd.read_sql_query("SELECT product_Name, stock_on_hand, reorder_quantity FROM inventory", conn).to_string()
+        fin_summary = pd.read_sql_query("SELECT account_Name, account_Type, balance FROM chart_of_accounts", conn).to_string()
+        sales_summary = pd.read_sql_query("SELECT category, SUM(amount) as total FROM transactions GROUP BY category", conn).to_string()
         supplier_summary = pd.read_sql_query("SELECT supplier_Name, products FROM suppliers", conn).to_string()
         conn.close()
 
-        # Step 1: Break goal into sub-tasks
         plan = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{
-                "role": "user",
-                "content": f"""You are a strategic planning agent for Global Trends, a home goods trading company in South Africa.
+            messages=[{"role": "user", "content": f"""You are a strategic planning agent for Global Trends, a home goods trading company in South Africa.
 
 Business Goal: {goal}
 
@@ -1313,23 +933,16 @@ Create a detailed action plan with:
 5. SUCCESS METRICS: How will we know it's achieved?
 6. RISKS: Top 2 risks and mitigations
 
-Be specific to Global Trends' actual data above."""
-            }],
+Be specific to Global Trends' actual data above."""}],
             max_tokens=800, temperature=0.3
         ).choices[0].message.content
 
-        # Step 2: Extract and execute database queries for relevant data
         data_queries = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{
-                "role": "user",
-                "content": f"""Based on this business goal: {goal}
-
+            messages=[{"role": "user", "content": f"""Based on this business goal: {goal}
 Write 2 SQL SELECT queries that would give the most useful data to support this goal.
 Use these tables: inventory, product, suppliers, customers, transactions, accounts_receivable
-
-Return ONLY the SQL, one per line, no explanation."""
-            }],
+Return ONLY the SQL, one per line, no explanation."""}],
             max_tokens=200, temperature=0.1
         ).choices[0].message.content
 
@@ -1410,9 +1023,7 @@ IMPORTANT: Always use Final Answer when you have the data you need."""
             if line.startswith("Action:"):
                 action = line.replace("Action:", "").strip()
             if line.startswith("Action Input:"):
-                # Capture multi-line action inputs (e.g. multi-line SQL)
                 action_input = line.replace("Action Input:", "").strip()
-                # Grab any continuation lines
                 for j in range(i + 1, len(lines)):
                     if lines[j].startswith("Action") or lines[j].startswith("Thought") or lines[j].startswith("Final"):
                         break
@@ -1432,7 +1043,6 @@ IMPORTANT: Always use Final Answer when you have the data you need."""
 
         messages.append({"role": "user", "content": f"Observation: {observation}\nThought:"})
 
-    # If we ran out of iterations, ask the model to summarise what it found
     messages.append({"role": "user", "content": "Please give a Final Answer based on what you've found so far."})
     response = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile", messages=messages,
@@ -1516,9 +1126,9 @@ def save_invoice_to_database(invoice_data):
     cursor = conn.cursor()
     try:
         cursor.execute("""INSERT INTO accounts_receivable
-                          (receivable_ID, customer_ID, customer_Name, invoice_Date, due_Date, invoice_Amount,
-                           amount_Paid, outstanding_Balance, status)
-                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (receivable_ID, customer_ID, customer_Name, invoice_Date, due_Date, invoice_Amount,
+             amount_Paid, outstanding_Balance, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                        (invoice_data.get('invoice_number', ''), invoice_data.get('customer_id', ''),
                         invoice_data.get('customer_name', ''), invoice_data.get('invoice_date', ''),
                         invoice_data.get('due_date', ''), invoice_data.get('total', 0), 0,
@@ -1566,7 +1176,7 @@ def process_sale(customer_id, customer_name, customer_type, items, recipient_ema
 
 
 # ============================================
-# GET UNREAD ALERTS COUNT
+# ALERT HELPERS
 # ============================================
 def get_unread_alerts_count():
     try:
@@ -1646,23 +1256,14 @@ if "Agent Command Centre" in page:
     st.title("🧠 Agent Command Centre")
     st.markdown("*Autonomous AI agents monitoring, reasoning, and acting on your behalf*")
 
-    # Unread alerts banner
     if unread_count > 0:
-        st.markdown(
-            f'<div class="alert-box">📬 You have <strong>{unread_count} unread alerts</strong> from your agents.</div>',
-            unsafe_allow_html=True)
+        st.markdown(f'<div class="alert-box">📬 You have <strong>{unread_count} unread alerts</strong> from your agents.</div>', unsafe_allow_html=True)
 
-    # Agent status overview
     st.markdown("### 🤖 Agent Status")
     cols = st.columns(7)
     agents = [
-        ("📦", "Stock Monitor"),
-        ("💸", "AR Collection"),
-        ("🏭", "Supplier Perf."),
-        ("📈", "Sales Forecast"),
-        ("👥", "CRM Agent"),
-        ("💰", "Fin. Health"),
-        ("🎯", "Goal Planner"),
+        ("📦", "Stock Monitor"), ("💸", "AR Collection"), ("🏭", "Supplier Perf."),
+        ("📈", "Sales Forecast"), ("👥", "CRM Agent"), ("💰", "Fin. Health"), ("🎯", "Goal Planner"),
     ]
     for col, (icon, name) in zip(cols, agents):
         with col:
@@ -1673,12 +1274,8 @@ if "Agent Command Centre" in page:
             </div>""", unsafe_allow_html=True)
 
     st.markdown("---")
+    tabs = st.tabs(["📦 Stock", "💸 AR", "🏭 Suppliers", "📈 Forecast", "👥 CRM", "💰 Finance", "🎯 Goal Planner", "📋 Logs & Alerts"])
 
-    # Run agents
-    tabs = st.tabs(
-        ["📦 Stock", "💸 AR", "🏭 Suppliers", "📈 Forecast", "👥 CRM", "💰 Finance", "🎯 Goal Planner", "📋 Logs & Alerts"])
-
-    # ── STOCK MONITOR TAB
     with tabs[0]:
         st.subheader("📦 Proactive Stock Monitor Agent")
         st.markdown("*Autonomously checks inventory levels, reasons about urgency, and sends reorder alerts*")
@@ -1686,8 +1283,7 @@ if "Agent Command Centre" in page:
             with st.spinner("Agent scanning inventory and reasoning..."):
                 result = run_stock_monitor_agent()
             if result['status'] == 'healthy':
-                st.markdown('<div class="alert-box-green">✅ All stock levels are healthy. No action needed.</div>',
-                            unsafe_allow_html=True)
+                st.markdown('<div class="alert-box-green">✅ All stock levels are healthy. No action needed.</div>', unsafe_allow_html=True)
             elif result['status'] == 'alerts':
                 st.warning(f"⚠️ {len(result['alerts'])} products need attention")
                 for alert in result['alerts']:
@@ -1699,7 +1295,6 @@ if "Agent Command Centre" in page:
             else:
                 st.error(f"Agent error: {result.get('error')}")
 
-    # ── AR COLLECTION TAB
     with tabs[1]:
         st.subheader("💸 Accounts Receivable Collection Agent")
         st.markdown("*Autonomously monitors overdue invoices and escalates collection actions*")
@@ -1707,20 +1302,16 @@ if "Agent Command Centre" in page:
             with st.spinner("Agent scanning invoices and planning collection actions..."):
                 result = run_ar_collection_agent()
             if result['status'] == 'healthy':
-                st.markdown('<div class="alert-box-green">✅ No overdue invoices. All accounts current.</div>',
-                            unsafe_allow_html=True)
+                st.markdown('<div class="alert-box-green">✅ No overdue invoices. All accounts current.</div>', unsafe_allow_html=True)
             elif result['status'] == 'overdue_found':
                 st.warning(f"⚠️ R{result['total']:,.2f} in overdue invoices")
                 for action in result['actions']:
                     color = "alert-box-red" if action['days'] >= 30 else "alert-box"
-                    st.markdown(
-                        f'<div class="{color}">👤 <strong>{action["customer"]}</strong> — {action["action"]} ({action["days"]} days, R{action["amount"]:,.2f})</div>',
-                        unsafe_allow_html=True)
+                    st.markdown(f'<div class="{color}">👤 <strong>{action["customer"]}</strong> — {action["action"]} ({action["days"]} days, R{action["amount"]:,.2f})</div>', unsafe_allow_html=True)
                 st.dataframe(result['overdue'])
             else:
                 st.error(f"Agent error: {result.get('error')}")
 
-    # ── SUPPLIER PERFORMANCE TAB
     with tabs[2]:
         st.subheader("🏭 Supplier Performance Agent")
         st.markdown("*Evaluates supplier reliability and recommends strategic changes*")
@@ -1737,7 +1328,6 @@ if "Agent Command Centre" in page:
             else:
                 st.error(f"Agent error: {result.get('error')}")
 
-    # ── SALES FORECASTING TAB
     with tabs[3]:
         st.subheader("📈 Sales Trend & Demand Forecasting Agent")
         st.markdown("*Analyses transaction history and generates demand forecasts*")
@@ -1760,7 +1350,6 @@ if "Agent Command Centre" in page:
             else:
                 st.error(f"Agent error: {result.get('error')}")
 
-    # ── CRM TAB
     with tabs[4]:
         st.subheader("👥 Customer Relationship Agent")
         st.markdown("*Detects churn risk, identifies VIP customers, generates outreach strategies*")
@@ -1773,18 +1362,14 @@ if "Agent Command Centre" in page:
                 if result['actions']:
                     st.markdown("#### ⚠️ Customers Requiring Attention")
                     for action in result['actions']:
-                        st.markdown(
-                            f'<div class="alert-box">👤 <strong>{action["customer"]}</strong> — {action["issue"]} ({action["days"]} days since last order)</div>',
-                            unsafe_allow_html=True)
+                        st.markdown(f'<div class="alert-box">👤 <strong>{action["customer"]}</strong> — {action["issue"]} ({action["days"]} days since last order)</div>', unsafe_allow_html=True)
                 st.markdown(f"**🏆 Top Customers:** {result.get('top_customers', 'N/A')}")
                 if not result['customers'].empty:
-                    display_cols = [c for c in ['customer_Name', 'total_orders', 'total_spent', 'outstanding_balance',
-                                                'days_since_order'] if c in result['customers'].columns]
+                    display_cols = [c for c in ['customer_Name', 'total_orders', 'total_spent', 'outstanding_balance', 'days_since_order'] if c in result['customers'].columns]
                     st.dataframe(result['customers'][display_cols])
             else:
                 st.error(f"Agent error: {result.get('error')}")
 
-    # ── FINANCIAL HEALTH TAB
     with tabs[5]:
         st.subheader("💰 Financial Health Monitor Agent")
         st.markdown("*Monitors cash flow ratios, flags risks, and forecasts financial health*")
@@ -1808,11 +1393,9 @@ if "Agent Command Centre" in page:
             else:
                 st.error(f"Agent error: {result.get('error')}")
 
-    # ── GOAL PLANNER TAB
     with tabs[6]:
         st.subheader("🎯 Multi-Step Goal Planning Agent")
         st.markdown("*Give the agent a high-level business goal — it plans and executes the steps*")
-
         goal_examples = [
             "Prepare for the school holiday season in December",
             "Expand our curtains product line",
@@ -1823,10 +1406,7 @@ if "Agent Command Centre" in page:
         st.markdown("**Example goals:**")
         for ex in goal_examples:
             st.markdown(f"• *{ex}*")
-
-        goal_input = st.text_area("Enter your business goal:",
-                                  placeholder="e.g. Prepare for the school holiday season in December", height=80)
-
+        goal_input = st.text_area("Enter your business goal:", placeholder="e.g. Prepare for the school holiday season in December", height=80)
         if st.button("▶ Execute Goal Planning Agent", type="primary") and goal_input:
             with st.spinner("Agent planning and executing multi-step strategy..."):
                 result = run_goal_planning_agent(goal_input)
@@ -1841,11 +1421,9 @@ if "Agent Command Centre" in page:
             else:
                 st.error(f"Agent error: {result.get('error')}")
 
-    # ── LOGS & ALERTS TAB
     with tabs[7]:
         st.subheader("📋 Agent Logs & Alerts")
         col1, col2 = st.columns(2)
-
         with col1:
             st.markdown("#### 🔔 Recent Alerts")
             if st.button("Mark All as Read"):
@@ -1857,26 +1435,19 @@ if "Agent Command Centre" in page:
                     is_unread = row.get('is_read', 1) == 0
                     color = "alert-box-red" if row['alert_type'] in ['critical_stock', 'final_notice'] else "alert-box"
                     badge = " 🆕" if is_unread else ""
-                    st.markdown(
-                        f'<div class="{color}"><small><strong>{row["agent_name"]}</strong>{badge} — {row["timestamp"]}</small><br>{row["message"]}</div>',
-                        unsafe_allow_html=True)
+                    st.markdown(f'<div class="{color}"><small><strong>{row["agent_name"]}</strong>{badge} — {row["timestamp"]}</small><br>{row["message"]}</div>', unsafe_allow_html=True)
             else:
                 st.info("No alerts yet. Run an agent to generate alerts.")
-
         with col2:
             st.markdown("#### 📝 Agent Activity Log")
             logs_df = get_agent_logs()
             if not logs_df.empty:
                 for _, row in logs_df.iterrows():
-                    severity_color = {"critical": "alert-box-red", "warning": "alert-box", "info": "alert-box-green",
-                                      "error": "alert-box-red"}.get(row.get('severity', 'info'), "alert-box")
-                    st.markdown(
-                        f'<div class="{severity_color}"><small><strong>{row["agent_name"]}</strong> — {row["timestamp"]}</small><br><em>{row["action_taken"]}</em><br>{str(row["result"])[:200]}</div>',
-                        unsafe_allow_html=True)
+                    severity_color = {"critical": "alert-box-red", "warning": "alert-box", "info": "alert-box-green", "error": "alert-box-red"}.get(row.get('severity', 'info'), "alert-box")
+                    st.markdown(f'<div class="{severity_color}"><small><strong>{row["agent_name"]}</strong> — {row["timestamp"]}</small><br><em>{row["action_taken"]}</em><br>{str(row["result"])[:200]}</div>', unsafe_allow_html=True)
             else:
                 st.info("No agent activity yet.")
 
-    # ── RUN ALL AGENTS
     st.markdown("---")
     st.markdown("### ⚡ Run All Agents")
     if st.button("▶▶ Run All 6 Monitoring Agents Now", type="primary"):
@@ -1888,7 +1459,6 @@ if "Agent Command Centre" in page:
             results['forecast'] = run_sales_forecasting_agent()
             results['crm'] = run_crm_agent()
             results['finance'] = run_financial_health_agent()
-
         st.success("✅ All agents completed! Check the Logs & Alerts tab for results.")
         new_alerts = get_unread_alerts_count()
         if new_alerts > 0:
@@ -1961,8 +1531,7 @@ elif "Process Sale" in page:
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             if not products_df.empty:
-                prod_opts = {f"{r['products_ID']} ({r['product_ID']})": r['product_ID'] for _, r in
-                             products_df.iterrows()}
+                prod_opts = {f"{r['products_ID']} ({r['product_ID']})": r['product_ID'] for _, r in products_df.iterrows()}
                 sel_prod = st.selectbox("Product", list(prod_opts.keys()))
                 product_id = prod_opts[sel_prod]
             else:
@@ -2022,7 +1591,7 @@ elif "Process Sale" in page:
 
 
 # ============================================
-# DASHBOARDS (unchanged from original)
+# DASHBOARDS
 # ============================================
 elif "Supplier Dashboard" in page:
     st.header("🏭 Supplier Management")
@@ -2100,8 +1669,7 @@ elif "Financial Dashboard" in page:
     c4.metric("Owner Drawings", f"R{fin['total_drawings']:,.2f}")
     conn = sqlite3.connect(DB_PATH)
     ar = pd.read_sql_query(
-        "SELECT receivable_ID,customer_Name,due_Date,invoice_Amount,outstanding_Balance,status FROM accounts_receivable WHERE status != 'Paid' ORDER BY due_Date",
-        conn)
+        "SELECT receivable_ID,customer_Name,due_Date,invoice_Amount,outstanding_Balance,status FROM accounts_receivable WHERE status != 'Paid' ORDER BY due_Date", conn)
     if not ar.empty:
         st.subheader("Accounts Receivable")
         st.dataframe(ar)
@@ -2135,10 +1703,8 @@ elif "Add Data" in page:
                     conn = sqlite3.connect(DB_PATH)
                     conn.execute("INSERT INTO suppliers VALUES (?,?,?,?,?,?)",
                                  (s_id, s_name, s_account, s_wechat, s_website, s_products))
-                    conn.execute("INSERT INTO performance_notes VALUES (?,?,?,?)",
-                                 (s_id, 3, 'Alternative', 'New supplier'))
-                    conn.commit();
-                    conn.close()
+                    conn.execute("INSERT INTO performance_notes VALUES (?,?,?,?)", (s_id, 3, 'Alternative', 'New supplier'))
+                    conn.commit(); conn.close()
                     st.cache_data.clear()
                     st.success(f"✅ {s_name} added!")
                 except Exception as e:
@@ -2161,10 +1727,8 @@ elif "Add Data" in page:
                     conn.execute("INSERT INTO product VALUES (?,?,?,?,?,?,?,?,?)",
                                  (p_id, p_cat, p_name, p_sup, p_type, p_moq, p_lead, p_cost, p_price))
                     conn.execute("INSERT INTO inventory VALUES (?,?,?,?,?,?,?,?)",
-                                 (f"inv{p_id}", p_id, p_name, 0, 10, 20, 'Warehouse A',
-                                  datetime.now().strftime("%Y-%m-%d")))
-                    conn.commit();
-                    conn.close()
+                                 (f"inv{p_id}", p_id, p_name, 0, 10, 20, 'Warehouse A', datetime.now().strftime("%Y-%m-%d")))
+                    conn.commit(); conn.close()
                     st.cache_data.clear()
                     st.success(f"✅ {p_name} added!")
                 except Exception as e:
@@ -2185,8 +1749,7 @@ elif "Add Data" in page:
                     conn = sqlite3.connect(DB_PATH)
                     conn.execute("INSERT INTO retailers VALUES (?,?,?,?,?,?,?,?)",
                                  (r_id, r_name, r_status, r_qty, r_prod, r_ostatus, r_contact, r_terms))
-                    conn.commit();
-                    conn.close()
+                    conn.commit(); conn.close()
                     st.cache_data.clear()
                     st.success(f"✅ {r_name} added!")
                 except Exception as e:
@@ -2203,8 +1766,7 @@ elif "Add Data" in page:
                     conn = sqlite3.connect(DB_PATH)
                     conn.execute("INSERT INTO customers VALUES (?,?,?,?,?,?,?,?)",
                                  (c_id, c_name, c_phone, c_email, 0, 0.00, 0.00, None))
-                    conn.commit();
-                    conn.close()
+                    conn.commit(); conn.close()
                     st.cache_data.clear()
                     st.success(f"✅ {c_name} added!")
                 except Exception as e:
