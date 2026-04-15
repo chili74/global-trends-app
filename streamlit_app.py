@@ -1239,13 +1239,13 @@ page = st.sidebar.radio("Navigate", [
     f"🧠 Agent Command Centre{alert_badge}",
     "💬 AI Chat Assistant",
     "🛒 Process Sale",
-    "📊 Supplier Dashboard",
-    "📦 Product Dashboard",
-    "🏪 Retailer Dashboard",
-    "👥 Customer Dashboard",
-    "📦 Inventory Dashboard",
-    "💰 Financial Dashboard",
-    "⭐ Performance Dashboard",
+    "📊 Supplier ",
+    "📦 Product ",
+    "🏪 Retailer ",
+    "👥 Customer ",
+    "📦 Inventory ",
+    "💰 Financial ",
+    "⭐ Performance ",
     "➕ Add Data"
 ])
 
@@ -1593,7 +1593,7 @@ elif "Process Sale" in page:
 # ============================================
 # DASHBOARDS
 # ============================================
-elif "Supplier Dashboard" in page:
+elif "Supplier" in page:
     st.header("🏭 Supplier Management")
     df = get_suppliers()
     if not df.empty:
@@ -1623,7 +1623,7 @@ elif "Product Dashboard" in page:
     else:
         st.info("No product data.")
 
-elif "Retailer Dashboard" in page:
+elif "Retailer Dashboard " in page:
     st.header("🏪 Retailer Management")
     df = get_retailers()
     if not df.empty:
